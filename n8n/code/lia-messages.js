@@ -5,7 +5,7 @@
 const DEFAULT_CONFIG = {
   timeZone: 'America/La_Paz',
   currency: 'Bs',
-  payBaseUrl: 'https://YOUR-N8N-HOST/webhook/lia-pay',
+  payBaseUrl: 'https://marilyncd12.app.n8n.cloud/webhook/lia-pay',
   qrImageBaseUrl: 'https://quickchart.io/qr',
 };
 

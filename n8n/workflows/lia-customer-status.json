@@ -1,0 +1,151 @@
+{
+  "name": "lia-customer-status",
+  "nodes": [
+    {
+      "id": "d9b3dc7a-3dae-4230-9c14-7ca5edcbd6c2",
+      "name": "Start",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "inputSource": "workflowInputs",
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "phoneNumberId",
+              "type": "string"
+            },
+            {
+              "name": "from",
+              "type": "string"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "2f35262c-2f3b-4b65-91c1-b2244d5ffecf",
+      "name": "Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        220,
+        0
+      ],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "4859abf5-62e6-4234-8c57-a21212d83343",
+              "name": "supabaseUrl",
+              "value": "__SUPABASE_URL__",
+              "type": "string"
+            },
+            {
+              "id": "74f59c3a-bb28-4f6a-b4e3-a08f120c44bf",
+              "name": "waGraphVersion",
+              "value": "__WA_GRAPH_VERSION__",
+              "type": "string"
+            },
+            {
+              "id": "6622e2cf-25ff-4d3b-8651-6b9d4581aa8f",
+              "name": "waVerifyToken",
+              "value": "__WA_VERIFY_TOKEN__",
+              "type": "string"
+            },
+            {
+              "id": "ec009ecd-8718-4c4f-9263-8c8fa94919c6",
+              "name": "payBaseUrl",
+              "value": "__N8N_BASE_URL__/webhook/lia-pay",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      }
+    },
+    {
+      "id": "d5058f08-ac4a-4711-b1bc-4f2ab25326cf",
+      "name": "RPC customer status",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        440,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config').first().json.supabaseUrl }}/rest/v1/rpc/lia_customer_status",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ p_wa_phone_number_id: $('Start').item.json.phoneNumberId, p_customer_phone: $('Start').item.json.from }) }}",
+        "options": {}
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "__CRED:Supabase Lia__",
+          "name": "Supabase Lia"
+        }
+      }
+    },
+    {
+      "id": "46645c56-cd23-494f-95be-4fa067bfd40c",
+      "name": "Format status",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Open orders of the buyer: code, name, status, expires_at, position.\nreturn { json: { items: $json.items ?? [] } };"
+      }
+    }
+  ],
+  "connections": {
+    "Start": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "RPC customer status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RPC customer status": {
+      "main": [
+        [
+          {
+            "node": "Format status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/La_Paz"
+  }
+}

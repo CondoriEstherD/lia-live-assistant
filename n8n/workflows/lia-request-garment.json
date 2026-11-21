@@ -1,0 +1,282 @@
+{
+  "name": "lia-request-garment",
+  "nodes": [
+    {
+      "id": "169096f5-f402-4345-b5b1-e5a68da667f0",
+      "name": "Start",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "inputSource": "workflowInputs",
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "phoneNumberId",
+              "type": "string"
+            },
+            {
+              "name": "from",
+              "type": "string"
+            },
+            {
+              "name": "name",
+              "type": "string"
+            },
+            {
+              "name": "code",
+              "type": "string"
+            },
+            {
+              "name": "waMessageId",
+              "type": "string"
+            },
+            {
+              "name": "messageTs",
+              "type": "string"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "ed073716-1e0a-4cb9-b755-9701926b799f",
+      "name": "Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        220,
+        0
+      ],
+      "parameters": {
+        "mode": "manual",
+        "assignments": {
+          "assignments": [
+            {
+              "id": "f2b52db1-633f-4d5f-8f79-6eea1de36d13",
+              "name": "supabaseUrl",
+              "value": "__SUPABASE_URL__",
+              "type": "string"
+            },
+            {
+              "id": "9fa76104-4a97-49f9-899e-c5d06c1f6128",
+              "name": "waGraphVersion",
+              "value": "__WA_GRAPH_VERSION__",
+              "type": "string"
+            },
+            {
+              "id": "4602d714-9e48-431f-a31d-e14849557747",
+              "name": "waVerifyToken",
+              "value": "__WA_VERIFY_TOKEN__",
+              "type": "string"
+            },
+            {
+              "id": "5577492a-0068-4858-b92f-9b680c210c86",
+              "name": "payBaseUrl",
+              "value": "__N8N_BASE_URL__/webhook/lia-pay",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": false,
+        "options": {}
+      }
+    },
+    {
+      "id": "76aff9fe-f23c-44e4-9f62-b94fb0f089b1",
+      "name": "RPC request garment",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        440,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config').first().json.supabaseUrl }}/rest/v1/rpc/lia_request_garment",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ p_wa_phone_number_id: $('Start').first().json.phoneNumberId, p_customer_phone: $('Start').first().json.from, p_customer_name: $('Start').first().json.name, p_code: $('Start').first().json.code, p_wa_message_id: $('Start').first().json.waMessageId, p_message_ts: $('Start').first().json.messageTs }) }}",
+        "options": {}
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "__CRED:Supabase Lia__",
+          "name": "Supabase Lia"
+        }
+      }
+    },
+    {
+      "id": "63c7af3d-6407-4655-b34c-4f5aec545349",
+      "name": "Build reply",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        0
+      ],
+      "parameters": {
+        "jsCode": "//@include lia-messages.js\n\nconst input = $('Start').first().json;\nconst cfg = $('Config').first().json;\nconst result = $('RPC request garment').first().json;\nconst config = { ...DEFAULT_CONFIG, payBaseUrl: cfg.payBaseUrl };\nreturn [{ json: { result, body: buildRequestReply(input.from, result, config) } }];"
+      }
+    },
+    {
+      "id": "05e6c542-0662-407f-bcfc-b163277862c1",
+      "name": "Has reply",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        880,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "e7f1f2cc-87f8-4aeb-933f-7ee23af49436",
+              "leftValue": "={{ $json.body !== null && $json.body !== undefined }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      }
+    },
+    {
+      "id": "25d63689-7c6b-4973-b98a-cf034a132e5d",
+      "name": "Send WhatsApp",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1100,
+        -100
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.facebook.com/{{ $('Config').first().json.waGraphVersion }}/{{ $('Start').first().json.phoneNumberId }}/messages",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "whatsAppApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.body) }}",
+        "options": {}
+      },
+      "credentials": {
+        "whatsAppApi": {
+          "id": "__CRED:WhatsApp Lia__",
+          "name": "WhatsApp Lia"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "5da27517-62aa-4132-9ae1-7757fa4e590d",
+      "name": "Return result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        0
+      ],
+      "parameters": {
+        "jsCode": "return [{ json: $('Build reply').first().json.result }];"
+      }
+    }
+  ],
+  "connections": {
+    "Start": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "RPC request garment",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RPC request garment": {
+      "main": [
+        [
+          {
+            "node": "Build reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build reply": {
+      "main": [
+        [
+          {
+            "node": "Has reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has reply": {
+      "main": [
+        [
+          {
+            "node": "Send WhatsApp",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Return result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send WhatsApp": {
+      "main": [
+        [
+          {
+            "node": "Return result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/La_Paz"
+  }
+}

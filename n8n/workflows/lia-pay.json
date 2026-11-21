@@ -1,0 +1,388 @@
+{
+  "name": "lia-pay",
+  "nodes": [
+    {
+      "id": "e8360fe9-519e-4887-a385-fd6acd090b8d",
+      "name": "GET pay page",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "b6a52098-f207-49a0-9e9b-8484af9449ba",
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "lia-pay",
+        "responseMode": "responseNode",
+        "options": {}
+      }
+    },
+    {
+      "id": "b7eff3b7-0b78-4882-aa11-4ecd628c3eac",
+      "name": "POST confirm",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        200
+      ],
+      "webhookId": "84eb7874-f689-4180-9b7a-4dc49e619e0a",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "lia-pay/confirm",
+        "responseMode": "responseNode",
+        "options": {}
+      }
+    },
+    {
+      "id": "acd8cbd5-a860-4dfa-aedb-dc50bdd8c8ea",
+      "name": "Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        220,
+        100
+      ],
+      "parameters": {
+        "mode": "manual",
+        "includeOtherFields": false,
+        "options": {},
+        "assignments": {
+          "assignments": [
+            {
+              "id": "3831e663-083a-4e4f-84eb-c7e2dbb11dd8",
+              "name": "supabaseUrl",
+              "value": "__SUPABASE_URL__",
+              "type": "string"
+            },
+            {
+              "id": "868616e1-7791-4016-9aeb-597db6fdaa8c",
+              "name": "waGraphVersion",
+              "value": "__WA_GRAPH_VERSION__",
+              "type": "string"
+            },
+            {
+              "id": "964871e5-5a31-42c5-a8fc-0d410832bc7b",
+              "name": "waVerifyToken",
+              "value": "__WA_VERIFY_TOKEN__",
+              "type": "string"
+            },
+            {
+              "id": "b20e207e-590d-419b-953f-a7966a840816",
+              "name": "payBaseUrl",
+              "value": "__N8N_BASE_URL__/webhook/lia-pay",
+              "type": "string"
+            },
+            {
+              "id": "4936b260-c9a5-42b9-a406-3b4930276223",
+              "name": "token",
+              "value": "={{ $json.query?.token ?? $json.body?.token ?? '' }}",
+              "type": "string"
+            },
+            {
+              "id": "b385396c-2636-4b67-afe0-11b59bd42da9",
+              "name": "isConfirm",
+              "value": "={{ !!($json.body && $json.body.token) }}",
+              "type": "boolean"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "5fe5a6d6-ce03-46a6-b6c9-1fd5ab69fe2b",
+      "name": "Is confirm",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        440,
+        100
+      ],
+      "parameters": {
+        "options": {},
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "b74fd69b-4ce5-46c1-892e-e565e89d66ad",
+              "leftValue": "={{ $json.isConfirm }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "70896c69-4a61-475b-8b6c-053157cfaebf",
+      "name": "RPC read amount",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        660,
+        200
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config').first().json.supabaseUrl }}/rest/v1/rpc/lia_get_payment_qr",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ p_token: $('Config').first().json.token }) }}",
+        "options": {}
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "__CRED:Supabase Lia__",
+          "name": "Supabase Lia"
+        }
+      }
+    },
+    {
+      "id": "a5c53809-6808-4333-b841-4393c0fea2ad",
+      "name": "RPC confirm payment",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        880,
+        200
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config').first().json.supabaseUrl }}/rest/v1/rpc/lia_confirm_payment",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ p_token: $('Config').first().json.token, p_amount: $('RPC read amount').first().json.amount ?? null, p_paid_at: $now.toISO(), p_provider: 'lia_pay_mock', p_external_id: null, p_raw_payload: {} }) }}",
+        "options": {}
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "__CRED:Supabase Lia__",
+          "name": "Supabase Lia"
+        }
+      }
+    },
+    {
+      "id": "10162113-a08d-4bf0-8d4d-b61084be0242",
+      "name": "Run lia-dispatch",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        1100,
+        200
+      ],
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "__WF:lia-dispatch__"
+        },
+        "mode": "once",
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {
+          "waitForSubWorkflow": false
+        }
+      }
+    },
+    {
+      "id": "a4ff3151-b25c-40ab-9a26-b064fe0fd334",
+      "name": "RPC get payment QR",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1320,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config').first().json.supabaseUrl }}/rest/v1/rpc/lia_get_payment_qr",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ p_token: $('Config').first().json.token }) }}",
+        "options": {}
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "__CRED:Supabase Lia__",
+          "name": "Supabase Lia"
+        }
+      }
+    },
+    {
+      "id": "2dcc3289-44d6-4a2c-bb58-ad8b8efab080",
+      "name": "Build pay page",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1540,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "//@include lia-messages.js\n//@include lia-pay-page.js\n\nconst cfg = $('Config').first().json;\nconst config = { ...DEFAULT_CONFIG, payBaseUrl: cfg.payBaseUrl };\nconst result = $input.first().json ?? {};\nreturn [{ json: { html: buildPayPage(result, cfg.token, config) } }];"
+      }
+    },
+    {
+      "id": "fe7314ea-5d4f-4962-8af4-779d03d01d58",
+      "name": "Respond HTML",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1760,
+        0
+      ],
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ $json.html }}",
+        "options": {
+          "responseCode": 200,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "text/html; charset=utf-8"
+              }
+            ]
+          }
+        }
+      }
+    }
+  ],
+  "connections": {
+    "GET pay page": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "POST confirm": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "Is confirm",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is confirm": {
+      "main": [
+        [
+          {
+            "node": "RPC read amount",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "RPC get payment QR",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RPC read amount": {
+      "main": [
+        [
+          {
+            "node": "RPC confirm payment",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RPC confirm payment": {
+      "main": [
+        [
+          {
+            "node": "Run lia-dispatch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run lia-dispatch": {
+      "main": [
+        [
+          {
+            "node": "RPC get payment QR",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RPC get payment QR": {
+      "main": [
+        [
+          {
+            "node": "Build pay page",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build pay page": {
+      "main": [
+        [
+          {
+            "node": "Respond HTML",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/La_Paz"
+  }
+}

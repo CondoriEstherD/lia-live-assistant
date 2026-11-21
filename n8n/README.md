@@ -81,7 +81,7 @@ Resultado `pending_confirmation` = foto de la prenda (desde la app de la vendedo
 ```text
 Schedule cada 10 s  ─┐
 Execute Workflow ────┴→ HTTP RPC lia_claim_notifications (p_limit 20)
-                       → Split Out (una por notificación)
+                       (el nodo HTTP ya devuelve un item por notificación)
                        → Code: buildNotificationMessage
                        → HTTP enviar WhatsApp
                        → HTTP RPC lia_mark_notification_sent
@@ -160,3 +160,17 @@ router, cambia también el archivo en `code/` y vuelve a pegarlo en el nodo Code
 
 Los nodos Code de n8n no pueden importar archivos locales: copia las funciones que uses.
 `lia-pay-page.js` usa `formatAmount` y `formatTime` de `lia-messages.js`; pégalas en el mismo nodo.
+
+## Subir los workflows a n8n (deploy)
+
+Los 7 workflows están en `n8n/workflows/` y se suben a `https://marilyncd12.app.n8n.cloud` con:
+
+```bash
+node n8n/scripts/deploy.mjs            # crea o actualiza cada workflow por nombre
+node n8n/scripts/deploy.mjs --dry-run  # solo genera n8n/dist/*.json para importar a mano
+```
+
+- API key: archivo `~/.lia-n8n-key` (solo la key) o variable `N8N_API_KEY`. Nunca en el repo.
+- Opcionales: `SUPABASE_URL`, `WA_VERIFY_TOKEN` (texto que elijas; el mismo que pongas en Meta), `WA_GRAPH_VERSION`.
+- Credenciales en n8n con estos nombres exactos: `Supabase Lia`, `WhatsApp Lia`, `Anthropic Lia`.
+- Los workflows se suben **inactivos**; se activan desde el editor cuando Supabase y WhatsApp estén listos.

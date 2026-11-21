@@ -1,0 +1,151 @@
+{
+  "name": "lia-search-catalog",
+  "nodes": [
+    {
+      "id": "48a35ba4-0398-4f36-8cbe-36fb4e8f720a",
+      "name": "Start",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "inputSource": "workflowInputs",
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "phoneNumberId",
+              "type": "string"
+            },
+            {
+              "name": "query",
+              "type": "string"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "fac6865f-cb75-4643-9883-39c9954c1c54",
+      "name": "Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        220,
+        0
+      ],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "f663c89e-5ab1-4d3b-b98b-df080b6d56dc",
+              "name": "supabaseUrl",
+              "value": "__SUPABASE_URL__",
+              "type": "string"
+            },
+            {
+              "id": "d723b50b-5671-4257-a823-7a771f9f9664",
+              "name": "waGraphVersion",
+              "value": "__WA_GRAPH_VERSION__",
+              "type": "string"
+            },
+            {
+              "id": "1a51535c-c265-4fe3-971e-5189f15b1d9c",
+              "name": "waVerifyToken",
+              "value": "__WA_VERIFY_TOKEN__",
+              "type": "string"
+            },
+            {
+              "id": "010ff357-3dbb-4986-b050-62119b1280a4",
+              "name": "payBaseUrl",
+              "value": "__N8N_BASE_URL__/webhook/lia-pay",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      }
+    },
+    {
+      "id": "e6866b39-4867-4058-b7a3-1bf229d73928",
+      "name": "RPC search catalog",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        440,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config').first().json.supabaseUrl }}/rest/v1/rpc/lia_search_catalog",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ p_wa_phone_number_id: $('Start').item.json.phoneNumberId, p_query: $('Start').item.json.query, p_limit: 5 }) }}",
+        "options": {}
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "__CRED:Supabase Lia__",
+          "name": "Supabase Lia"
+        }
+      }
+    },
+    {
+      "id": "867fdcd8-49ae-4d2a-809c-4fb809708615",
+      "name": "Format results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Compact garment list for the agent (no internal ids or photo urls).\nconst items = ($json.items ?? []).map((g) => ({\n  code: g.code,\n  name: g.name,\n  size: g.size,\n  color: g.color,\n  price: g.price,\n  description: g.description,\n}));\nreturn { json: { count: items.length, items } };"
+      }
+    }
+  ],
+  "connections": {
+    "Start": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "RPC search catalog",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RPC search catalog": {
+      "main": [
+        [
+          {
+            "node": "Format results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/La_Paz"
+  }
+}
