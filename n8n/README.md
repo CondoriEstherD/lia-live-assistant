@@ -29,7 +29,7 @@ n8n/
 |---|---|---|
 | n8n con **HTTPS público** | WhatsApp solo envía webhooks a una URL https | n8n Cloud, o n8n local con un túnel (cloudflared / ngrok) |
 | Zona horaria de n8n `America/La_Paz` | Para que "Válido hasta 20:35" sea la hora de Bolivia | Variable `GENERIC_TIMEZONE` |
-| App de Meta con **WhatsApp Cloud API** | Número que atiende Lia | En modo prueba solo se puede escribir a pocos números verificados: registrar los teléfonos de la demo |
+| Canal de **Whapi.Cloud** (https://gate.whapi.cloud) | Número que atiende Lia | Credencial n8n `Whapi Lia` (Header Auth: `Authorization` = `Bearer <token>`). Webhook del canal: `https://<tu-n8n>/webhook/lia-whatsapp`. En Supabase, `sellers.wa_phone_number_id` = `channel_id` del canal |
 | Credencial **Supabase** (URL + service role key) | Llamar a las funciones (RPC) | La service role key va solo en n8n, nunca en la app móvil |
 | Credencial **Anthropic** | AI Agent | Ver `prompts/lia-system-prompt.md` |
 | Variable `LIA_PAY_BASE_URL` | URL de la página de pago simulada | `https://<tu-n8n>/webhook/lia-pay` |
@@ -39,8 +39,8 @@ Llamadas a Supabase: nodo **HTTP Request**
 y el body JSON con los parámetros `p_...`. (El nodo Supabase de n8n trabaja con tablas, no con funciones.)
 
 Llamadas a WhatsApp: nodo **HTTP Request**
-`POST https://graph.facebook.com/<version>/{{phone_number_id}}/messages` con el body que arma
-`code/lia-messages.js`. Usamos HTTP Request y no el nodo de WhatsApp porque necesitamos mensajes
+`POST https://gate.whapi.cloud/messages/<text|image|interactive>` (Whapi.Cloud) con el body que arma
+`toWhapi()` de `code/lia-messages.js`, credencial `Whapi Lia`. El token nunca va en el repo. Usamos HTTP Request y no el nodo de WhatsApp porque necesitamos mensajes
 interactivos (foto + botones "Sí, es esta" / "No es esta").
 
 ## 3. Workflows

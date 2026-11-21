@@ -52,8 +52,8 @@ authentication `predefinedCredentialType`, `nodeCredentialType: "supabaseApi"`, 
 
 ## Sending WhatsApp messages
 
-HTTP Request node: `POST https://graph.facebook.com/{{ $('Config').first().json.waGraphVersion }}/{{ phone_number_id }}/messages`,
-authentication `predefinedCredentialType`, `nodeCredentialType: "whatsAppApi"`, JSON body = the object built by
+HTTP Request node: `POST https://gate.whapi.cloud/{{ $json.message.path }}` (Whapi.Cloud), authentication
+`genericCredentialType` + `httpHeaderAuth` with credential `Whapi Lia`, JSON body = `toWhapi(...)` of the object built by
 `n8n/code/lia-messages.js` (never rebuild message text in nodes; texts live only in `lia-messages.js`).
 
 ## Code nodes
