@@ -1,0 +1,8 @@
+## Copy this file to local.properties and fill in your credentials.
+## NEVER commit real keys or service_role/secret keys.
+
+sdk.dir=/path/to/your/Android/sdk
+
+CLERK_PUBLISHABLE_KEY=pk_test_your_clerk_publishable_key
+SUPABASE_URL=https://your-project-ref.supabase.co
+SUPABASE_ANON_KEY=your_supabase_publishable_or_anon_key
