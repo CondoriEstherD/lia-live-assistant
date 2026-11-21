@@ -144,3 +144,10 @@ test('pay page escapes garment text', () => {
   const html = buildPayPage({ status: 'paid', amount: 1, garment: { code: 'A1', name: '<script>x</script>' } }, 't');
   assert.doesNotMatch(html, /<script>x/);
 });
+
+test('garment preview tells the buyer she has 1 minute to confirm', () => {
+  const msg = buildRequestReply('591700', {
+    status: 'pending_confirmation', confirm_deadline: '2026-11-22T00:36:00Z', garment,
+  });
+  assert.match(msg.interactive.body.text, /Confirma antes de las 20:36 \(1 minuto\)/);
+});

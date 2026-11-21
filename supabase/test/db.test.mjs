@@ -349,3 +349,21 @@ test('security: a Clerk user cannot claim a WhatsApp number or another account',
       /row-level security/);
   });
 });
+
+test('the buyer has 1 minute to confirm the photo; the QR is sent only after confirming', async () => {
+  const { db, sellerId } = await freshDb();
+  await addGarment(db, sellerId, 'A12');
+  await addGarment(db, sellerId, 'B01');
+
+  const pending = await request(db, 'ana', 'A12', at(0));
+  assert.equal(pending.status, 'pending_confirmation');
+  assert.equal(new Date(pending.confirm_deadline).toISOString(), at(60));
+  assert.equal((await one(db, `select count(*)::int as n from payment_qrs`)).n, 0, 'no QR before confirming');
+
+  assert.equal((await confirm(db, 'ana', at(59))).status, 'active');
+  assert.equal((await one(db, `select count(*)::int as n from payment_qrs`)).n, 1, 'QR only after confirming');
+
+  await request(db, 'bea', 'B01', at(0));
+  assert.equal((await confirm(db, 'bea', at(61))).status, 'confirmation_expired');
+  assert.equal((await one(db, `select count(*)::int as n from payment_qrs`)).n, 1, 'late confirmation gets no QR');
+});

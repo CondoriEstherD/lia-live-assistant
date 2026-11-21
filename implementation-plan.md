@@ -77,7 +77,7 @@ Available units = `stock − active reservations`. The app shows a **Reserved** 
 
 1. Buyer writes a code (e.g. `A12`).
 2. Lia replies with the garment **photo**, name, size and price: "Is this the one? Reply SI".
-3. Buyer replies `SI` within 2 minutes → queue by WhatsApp message time.
+3. Buyer replies `SI` within 1 minute (no QR before confirming) → queue by WhatsApp message time.
 4. When it is the buyer's turn: Lia sends **one QR image** (garment, amount, "Valid until HH:MM") that expires in 5 minutes.
 5. Paid in time → "Payment confirmed, A12 is yours"; the seller and queued buyers are notified.
 6. Not paid in time → "Your QR expired and can no longer be paid"; next buyer gets a new QR.

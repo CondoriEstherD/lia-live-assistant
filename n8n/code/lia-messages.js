@@ -49,10 +49,13 @@ function qrImageUrl(token, config = DEFAULT_CONFIG) {
 }
 
 /** Photo of the garment + "is this the one?" buttons (result of lia_request_garment). */
-function buildPreviewMessage(to, garment, config = DEFAULT_CONFIG) {
+function buildPreviewMessage(to, garment, config = DEFAULT_CONFIG, confirmDeadline = null) {
   const body =
     `Lia: ¿Es esta prenda?\n\n${garmentLabel(garment)}\nPrecio: ${formatAmount(garment.price, config)}` +
-    (garment.description ? `\n${garment.description}` : '');
+    (garment.description ? `\n${garment.description}` : '') +
+    (confirmDeadline
+      ? `\n\nConfirma antes de las ${formatTime(confirmDeadline, config)} (1 minuto). Te envío el QR de pago apenas confirmes.`
+      : '');
 
   const interactive = {
     type: 'button',
@@ -74,7 +77,7 @@ function buildPreviewMessage(to, garment, config = DEFAULT_CONFIG) {
 function buildRequestReply(to, result, config = DEFAULT_CONFIG) {
   switch (result.status) {
     case 'pending_confirmation':
-      return buildPreviewMessage(to, result.garment, config);
+      return buildPreviewMessage(to, result.garment, config, result.confirm_deadline);
     case 'not_found':
       return text(to, `Lia: no encontré la prenda ${result.code}. Revisa el código que dijeron en el live y escríbelo de nuevo.`);
     case 'sold_out':

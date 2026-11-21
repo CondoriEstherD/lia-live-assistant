@@ -78,7 +78,10 @@ Confirmar con la foto antes de reservar es obligatorio: resuelve el "me equivoqu
 
 - **R1 — Orden de llegada:** se ordena por el `timestamp` del mensaje que entrega WhatsApp
   (precisión de segundos); empate → por `received_at` del servidor y luego por id. El orden se
-  fija al recibir el **código**, no al confirmar con "SI" (la confirmación solo tiene un plazo, ej. 2 min).
+  fija al recibir el **código**, no al confirmar con "SI" (la confirmación tiene un plazo de **1 minuto**).
+- **R1b — Confirmar antes del QR (1 minuto):** después de ver la foto, la clienta tiene **1 minuto** para tocar
+  "Sí, es esta". Recién con esa confirmación se le reserva la prenda y se le envía el QR de 5 minutos. Si no
+  confirma a tiempo, el pedido se cancela y no recibe QR.
 - **R2 — Un dueño por unidad:** como máximo hay `stock` reservas `ACTIVE` + ventas `PAID` por variante.
   Se garantiza en SQL, no en n8n.
 - **R3 — Un solo QR activo por unidad:** nunca se envía el QR a la siguiente clienta mientras la reserva
