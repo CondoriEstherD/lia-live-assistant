@@ -1,8 +1,20 @@
 # Lia (Live Interactive Assistant) — Contexto del proyecto
 
 > **Lia** es la asistente de ventas para lives (TikTok → WhatsApp). El agente se presenta a las clientas como "Lia".
-> Hackathon Nodo Cero · Santa Cruz, Bolivia · Stack: n8n + Supabase + panel web (Clerk)
+> Hackathon Nodo Cero · Santa Cruz, Bolivia · Stack: app Android (Kotlin + Compose) + Supabase + n8n + Clerk
 > Este archivo es la fuente de verdad del negocio. Toda IA o persona que implemente debe leerlo antes de escribir código.
+> Qué construir y en qué orden: `implementation-plan.md`. Avance de tareas: `odd/tasks/lia-mvp.md`.
+
+## 0. Un solo sistema, tres partes
+
+| Parte | La usa | Qué hace |
+|---|---|---|
+| **App móvil de la vendedora** (Android) | Quien hace el live | Carga prendas (código, foto, precio, stock), inicia/cierra el live, ve reservas en vivo, registra ventas manuales, ve estadísticas |
+| **Lia** (n8n + LLM + WhatsApp) | Las clientas | Atiende por WhatsApp con los datos que la vendedora cargó en la app |
+| **Supabase** | Las dos | Única fuente de verdad que comparten la app y Lia |
+
+**Lia saca toda la información de la app móvil** (vía Supabase): no tiene catálogo propio. Si la vendedora
+edita el precio o la foto en la app, Lia responde con el dato nuevo en el siguiente mensaje.
 
 ## 1. El problema (uno solo)
 
@@ -34,7 +46,7 @@ reserva con vencimiento y pago que no se pueda cruzar.
 
 | Actor | Qué hace |
 |---|---|
-| Vendedora (seller) | Carga prendas con código y foto, abre/cierra el live, confirma pagos dudosos, ve ventas |
+| Vendedora (seller) | Desde la app móvil: carga prendas con código y foto, abre/cierra el live, resuelve pagos tardíos, ve ventas |
 | Clienta (customer) | Escribe el código por WhatsApp, confirma la prenda, paga con el QR de su reserva dentro de los 5 min |
 | Agente (n8n + LLM) | Responde, muestra la foto, gestiona la fila y los avisos |
 | Supabase | Fuente de verdad: catálogo, stock, fila, reservas, pagos |

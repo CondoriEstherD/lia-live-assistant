@@ -1,0 +1,8 @@
+{
+  "name": "lia-live-assistant",
+  "private": true,
+  "description": "Lia (Live Interactive Assistant): WhatsApp sales agent for TikTok live shopping.",
+  "scripts": {
+    "test": "node --test n8n/test/"
+  }
+}

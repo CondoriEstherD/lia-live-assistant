@@ -1,16 +1,46 @@
-# Implementation Plan
+# Implementation Plan — Lia (Live Interactive Assistant)
 
 ## Overview
 
-Build an Android app with Kotlin and Jetpack Compose for sellers who sell clothing during live streams. The app should make it easy to add garments, record sales, and review results.
+Lia is **one system** with three parts that share a single Supabase database:
 
-This document is a plan, not an authorization to implement the app. Publishing to an app store requires a separate decision.
+| Part | Who uses it | What it does |
+| --- | --- | --- |
+| **Seller app** (Android, Kotlin + Jetpack Compose) | The seller running the TikTok live | Loads garments with code, photo and price; starts/ends the live; watches reservations in real time; records manual sales; sees statistics |
+| **Lia agent** (n8n + LLM + WhatsApp Cloud API) | Buyers on WhatsApp | Receives a garment code, shows the garment, manages the first-come queue, sends a single-use payment QR **as an image** that expires in **5 minutes**, and sends notifications |
+| **Supabase** (Postgres + Storage) | Both | Single source of truth: catalog, stock, queue, reservations, payments, sales, notifications |
 
-## 1. Functional Scope
+**Lia never has its own catalog.** Everything Lia says about a garment comes from what the seller loaded in the app.
 
-### Seller Account
+Business rules live in `CLAUDE.md`. This document describes what to build and in which order.
 
-Collect the following information during account creation, without a separate profile-completion screen:
+```text
+Seller app ──(Clerk JWT + RLS)──► Supabase ◄──(service role, RPC)── n8n (Lia) ◄──► WhatsApp
+                                     ▲                                  │
+                                     └──── Lia Pay mock (pay page) ◄────┘ QR image
+```
+
+This document is a plan. Publishing to an app store requires a separate decision.
+
+## 1. Key Rule: The Database Decides
+
+Queue order, reservations, stock, QR expiry and payment acceptance are decided **only** by transactional SQL
+functions in Supabase. The app and n8n call those functions; they never update stock or statuses with raw
+`UPDATE`s. This is what prevents double sales between a WhatsApp reservation and a manual sale in the app.
+
+| Function | Caller | Purpose |
+| --- | --- | --- |
+| `lia_request_garment` | n8n | Buyer wrote a code → returns garment data from the catalog and opens a pending request |
+| `lia_confirm_request` | n8n | Buyer answered "SI" → joins the queue; gets a reservation + QR if a unit is free |
+| `lia_expire_reservations` | n8n cron (every minute) | Expires 5-minute reservations and QRs, promotes the next buyer |
+| `lia_confirm_payment` | Lia Pay mock / bank webhook | Accepts a payment only if the QR is still valid |
+| `lia_get_payment_qr` | Lia Pay mock | Reads QR status for the payment page |
+| `lia_pending_notifications` / `lia_mark_notification_sent` | n8n | Notification outbox |
+| `record_manual_sale` / `void_sale` | Seller app | Manual sales that respect active reservations |
+
+## 2. Functional Scope
+
+### Seller Account (app)
 
 | Field | Requirement |
 | --- | --- |
@@ -19,254 +49,162 @@ Collect the following information during account creation, without a separate pr
 | Name | Optional |
 | Username | Optional |
 | Social media profile links | Optional, for reference |
+| Reservation minutes | Defaults to 5 |
 
-After registration and any required authentication verification, open Home. Sellers can edit these details in Profile; WhatsApp remains required. Format validation does not verify ownership of the WhatsApp number.
+After registration, open Home. Sellers edit these details in Profile; WhatsApp remains required.
 
-### Garments
+### Garments (app → Lia)
 
 | Field | Requirement |
 | --- | --- |
-| Code | Required |
-| Selling price | Required |
+| Code | Required, unique per seller among non-archived garments (case-insensitive) |
+| Selling price | Required, greater than 0 |
 | Stock | Defaults to 1 |
-| Name | Optional |
-| Photo | Optional |
-| Size | Optional |
-| Color | Optional |
-| Description | Optional |
+| Name | Optional (Lia uses the code when empty) |
+| Photo | Optional (Lia sends it to confirm the garment) |
+| Size, Color, Description | Optional |
 | Initial status | In catalog |
 
-Supported statuses:
+Statuses: **In catalog** (available), **Sold** (stock 0), **Archived** (hidden, history kept).
+Available units = `stock − active reservations`. The app shows a **Reserved** badge while a buyer holds a unit.
 
-- **In catalog:** available for sale.
-- **Sold:** no units remain available.
-- **Archived:** hidden from the catalog while preserving history.
+### Live Session (app)
 
-Selling a garment deducts the quantity sold. If units remain, it stays in the catalog. When stock reaches zero, it becomes Sold.
+- **Start live / End live** button on Home. Lia only reserves garments while a live is active.
+- **Live board:** per garment code, who holds the reservation, remaining time, and queue length (Supabase Realtime).
 
-## 2. Screens and Navigation
+### Lia on WhatsApp (n8n)
+
+1. Buyer writes a code (e.g. `A12`).
+2. Lia replies with the garment **photo**, name, size and price: "Is this the one? Reply SI".
+3. Buyer replies `SI` within 2 minutes → queue by WhatsApp message time.
+4. When it is the buyer's turn: Lia sends **one QR image** (garment, amount, "Valid until HH:MM") that expires in 5 minutes.
+5. Paid in time → "Payment confirmed, A12 is yours"; the seller and queued buyers are notified.
+6. Not paid in time → "Your QR expired and can no longer be paid"; next buyer gets a new QR.
+
+### Payments
+
+- **Hackathon:** simulated provider "Lia Pay". The QR opens a payment page with a 5-minute countdown that
+  rejects payment after expiry. No real money.
+- **Later:** a bank or payment gateway QR API with minute-level expiry and a payment webhook, behind the same
+  `PaymentProvider` contract. See `CLAUDE.md` §6.
+
+## 3. Seller App Screens and Navigation
 
 ### Authentication Screens
 
-- Welcome.
-- Sign in.
-- Create account, including the required WhatsApp number and optional reference details.
-- Account recovery and verification appropriate to the selected authentication method.
-
-Authentication screens do not display the bottom navigation or floating add button.
+Welcome, Sign in, Create account (required WhatsApp + optional details), recovery/verification for the chosen
+Clerk method. No bottom navigation or floating button here.
 
 ### Persistent Bottom Navigation
 
-Use exactly three destinations, each with an icon and label:
-
 | Destination | Contents |
 | --- | --- |
-| Home | Statistics and sales history |
-| Garments | Inventory, search, filters, editing, and sales actions |
-| Profile | Seller details, theme, notifications, and sign out |
+| Home | Live start/end, live board, statistics and sales history |
+| Garments | Inventory, search, filters, editing, manual sale, archive |
+| Profile | Seller details, reservation minutes, theme, notifications, sign out |
 
 Highlight the active destination in pink.
 
 ### Global Floating Add Button
 
-Display a floating **+** button on all three main screens, above the bottom navigation at the bottom right.
-
-- Always opens Create garment.
-- Uses the same reusable creation form regardless of the originating screen.
-- Returns to the originating destination after saving or canceling.
-- Does not appear inside the garment form.
-- Is the only garment-creation entry point; the Garments list has no additional create button.
-- Must not obscure list content or navigation.
+Floating **+** on the three main screens, above the bottom navigation. Always opens Create garment, reuses the
+same form, returns to the origin, hidden inside the form, and is the only creation entry point.
 
 ### Home
 
+- Live card: Start/End live and, while live, the live board.
 - Period selector: Today, This week, This month.
-- Summary cards for sales revenue and units sold.
-- Profit only if cost tracking is agreed upon.
-- Sales history showing garment code or name, quantity, amount, and date.
-- Simple presentation without unnecessary charts.
+- Summary cards: revenue and units sold (WhatsApp and manual).
+- Sales history: code or name, quantity, amount, channel, date.
 
 ### Garments
 
-- Search by code and optional name.
-- Filters: In catalog, Sold, Archived.
-- Reusable cards showing an optional photo, code, optional name, price, stock, and status.
-- Tapping a card opens editing.
-- Actions to record a sale and archive a garment.
-- Creation is handled exclusively by the global floating add button.
+- Search by code and name; filters In catalog, Sold, Archived.
+- Cards: optional photo, code, optional name, price, stock, status, Reserved badge.
+- Tap opens editing. Actions: record manual sale, archive.
 
 ### Profile
 
-- Edit WhatsApp and optional seller details.
-- Select Light or Dark mode.
-- View notifications and configure notification permissions.
-- Sign out.
+Edit WhatsApp and optional details, reservation minutes, Light/Dark mode, notifications (sales, late payments),
+sign out.
 
-## 3. Visual System and Reusable Components
+## 4. Visual System and Reusable Components
 
-Use a pink visual direction inspired by Gentle Shell. Exact palette values must be agreed upon during design; do not treat proposed colors as official Gentle Shell tokens.
-
-- **Light mode:** light surfaces with pink accents.
-- **Dark mode:** dark surfaces with pink accents adjusted for contrast.
-- Communicate status through text as well as color.
-- Use touch-friendly controls suitable for operating during a live stream.
-- Keep garment cards consistent, including when no photo is provided.
-
-Define colors centrally. Give each reusable component its own file rather than placing all components in one large file. Screens consume shared components and theme values instead of duplicating styles or controls.
-
-### Proposed Structure
+Pink visual direction inspired by Gentle Shell (palette to be agreed; not official tokens). Light and dark modes,
+status communicated with text and color, touch-friendly controls for use during a live, consistent cards with or
+without photo. One file per reusable component; colors defined centrally.
 
 ```text
-ui/
-  theme/
-    Color.kt
-    Theme.kt
-    Type.kt
-    Dimensions.kt
-    Shape.kt
-
-  components/
-    AppButton.kt
-    AppTextField.kt
-    AppCard.kt
-    GarmentCard.kt
-    StatCard.kt
-    StatusBadge.kt
-    PhotoPicker.kt
-    AddGarmentFab.kt
-    AppBottomBar.kt
-    ConfirmationDialog.kt
-
-  navigation/
-    AppNavigation.kt
-    AppScaffold.kt
-
-  screens/
-    auth/
-    home/
-    garments/
-    profile/
-
-data/
-  auth/
-  garments/
-  sales/
-  profile/
-  notifications/
+android/app/src/main/java/.../
+  ui/theme/        Color.kt Theme.kt Type.kt Dimensions.kt Shape.kt
+  ui/components/   AppButton.kt AppTextField.kt AppCard.kt GarmentCard.kt StatCard.kt StatusBadge.kt
+                   PhotoPicker.kt AddGarmentFab.kt AppBottomBar.kt ConfirmationDialog.kt LiveBoard.kt
+  ui/navigation/   AppNavigation.kt AppScaffold.kt
+  ui/screens/      auth/ home/ garments/ profile/
+  data/            auth/ garments/ sales/ live/ profile/ notifications/
 ```
 
-The shared app scaffold owns the bottom navigation and global floating add button.
+## 5. Repository Layout
 
-## 4. Implementation Phases
+```text
+CLAUDE.md                     business context (source of truth)
+implementation-plan.md        this plan
+supabase/migrations/          schema, functions, security (RLS)
+supabase/tests/               SQL function tests (PGlite, `npm test`)
+n8n/workflows/                exported Lia workflows (JSON)
+n8n/lia-pay/                  payment page served by n8n
+android/                      seller app
+odd/tasks/lia-mvp.md          task log
+```
 
-### Phase 1 — Design and Business Rules
+## 6. Implementation Phases (demo-critical first)
 
-- Design authentication, registration, and the three main destinations.
-- Design garment creation and editing.
-- Show the screens in light and dark modes.
-- Agree on the palette, typography, and shared components.
-- Define validation and sales behavior.
-- Resolve open decisions before implementing the affected functionality.
+| Phase | Scope | Deliverable |
+| --- | --- | --- |
+| 1 — Database core | Schema, SQL functions, notification outbox, RLS, tests | Queue, 5-min reservation, QR expiry and payment rules proven by tests |
+| 2 — Lia agent | n8n workflows: WhatsApp inbound, code → photo → SI → queue, QR image, expiry cron, notifications | A real WhatsApp conversation reserves and sells a garment |
+| 3 — Lia Pay mock | QR image + payment page with countdown; expired QR rejects payment | Demo of "cannot pay after 5 minutes" |
+| 4 — App foundation | Kotlin + Compose project, theme, components, navigation, FAB | Navigable shell in both themes |
+| 5 — App account + garments | Clerk, seller profile, garments CRUD, photos in Storage | Garments loaded in the app are visible to Lia |
+| 6 — App live + sales | Start/end live, live board (Realtime), manual sales, statistics | Seller runs the live from the phone |
+| 7 — Polish | Theme persistence, notifications in Profile, push (FCM) if time allows | — |
 
-**Deliverable:** approved screen designs and behavior before production UI implementation.
+Phases 1–3 and 4–5 can run in parallel by different teammates: the contract between them is the database
+schema in `supabase/migrations/`.
 
-### Phase 2 — Android Foundation and Shared Components
-
-- Create the Kotlin project with Jetpack Compose and Material 3.
-- Implement shared theme values and components.
-- Build navigation, bottom navigation, and the global add button.
-- Prepare screens with sample data.
-- Include empty, loading, and error states.
-
-**Deliverable:** a consistent, navigable app shell in both themes.
-
-### Phase 3 — Registration, Sign-In, and Seller Account
-
-- Integrate Clerk.
-- Implement registration with required WhatsApp and optional reference details.
-- Store seller profiles in Supabase, linked to the Clerk identity.
-- Persist authentication sessions across app launches.
-- Support profile editing.
-- Implement sign out, clear account-specific local state, and prevent back navigation into authenticated screens after sign out.
-- Restrict each seller's access to their own data and images.
-
-**Deliverable:** working registration, sign-in, profile editing, session persistence, and sign out.
-
-### Phase 4 — Inventory and Photos
-
-- Create garments from any main destination through the global add button.
-- Reuse the garment form for creation and editing.
-- Upload, replace, and remove optional photos using Supabase Storage.
-- Implement search and status filters.
-- Archive garments without deleting sales history.
-- Validate inputs and present clear errors.
-
-**Deliverable:** persistent and usable inventory management.
-
-### Phase 5 — Sales and Statistics
-
-- Record the quantity and amount of each sale.
-- Update sale records and stock together to avoid inconsistent results.
-- Update garment status when stock reaches zero.
-- Preserve the price at the time of each sale so later price edits do not alter historical statistics.
-- Support correcting an accidental sale, including the corresponding stock and statistics changes.
-- Show revenue, units sold, and sales history by period.
-- Calculate profit only if cost tracking is agreed upon.
-
-**Deliverable:** sales and statistics that remain consistent with inventory and historical prices.
-
-### Phase 6 — Theme Preferences and Notifications
-
-- Add a Light/Dark selector in Profile.
-- Persist the selection and restore it on app launch.
-- Apply theme changes throughout the interface.
-- Agree on which events generate notifications.
-- Integrate notification permissions and push delivery through Firebase Cloud Messaging.
-- Display notifications within Profile.
-
-**Deliverable:** persistent appearance preferences and notifications for the agreed events.
-
-### Phase 7 — Android Validation
-
-Test functionality during each phase, then validate the complete flow:
-
-- Registration requires WhatsApp and accepts empty optional fields.
-- Sign-in, session persistence, and sign out work correctly.
-- Garments can be created with only code and price; stock defaults to 1 and status defaults to In catalog.
-- Missing name or photo does not break garment forms or cards.
-- Editing, archiving, and selling work correctly with stock of 1 and greater quantities.
-- Sale corrections keep inventory and statistics consistent.
-- Historical sale amounts remain unchanged after garment price edits.
-- Seller data and images remain isolated between accounts.
-- Theme selection survives an app restart.
-- Bottom navigation and the floating add button remain usable on small screens and do not obscure content or interfere with the keyboard.
-- Empty, loading, error, and notification-permission states are usable.
-
-**Deliverable:** a validated, installable Android build. App store publication is excluded from this phase.
-
-## 5. Technology
+## 7. Technology
 
 | Area | Technology |
 | --- | --- |
-| Android development | Kotlin |
-| UI | Jetpack Compose and Material 3 |
-| Authentication | Clerk |
-| Profiles, inventory, and sales | Supabase |
-| Garment photos | Supabase Storage |
-| Android push notifications | Firebase Cloud Messaging |
+| Seller app | Kotlin, Jetpack Compose, Material 3 |
+| Authentication | Clerk (Supabase third-party auth with the Clerk JWT; verify SDK setup) |
+| Data, photos, realtime | Supabase (Postgres, Storage, Realtime) |
+| Agent | n8n + LLM + WhatsApp Cloud API |
+| Payments | Lia Pay mock now; bank/gateway QR API later |
+| Push notifications | Firebase Cloud Messaging (optional, phase 7) |
 
-n8n is deferred and is not required for the initial inventory and manual sales workflows.
+## 8. Validation Checklist
 
-## 6. Open Decisions
+- Two buyers write the same code: the earlier WhatsApp message gets the reservation; the other is queued.
+- Only one active QR per unit; the next buyer gets a QR only after expiry or cancellation.
+- A QR older than 5 minutes cannot be paid (page and database both reject it).
+- Paid in time → stock decreases, sale recorded, buyer, seller and queued buyers notified.
+- A manual sale in the app cannot take a unit held by an active WhatsApp reservation.
+- Garments created with only code and price work in the app and in Lia; stock defaults to 1.
+- Historical sale amounts do not change after price edits; voiding a sale restores stock.
+- Seller data and photos are isolated between accounts.
+- App: session persistence, sign out, theme survives restart, FAB does not cover content.
 
-1. **Profit definition:** show revenue only, or subtract garment cost? Actual profit requires cost information; an optional cost field is proposed but not yet approved. Missing cost must not be presented as known profit.
-2. **Authentication method:** choose the Clerk sign-in and registration method.
-3. **Notification events:** decide which events should trigger notifications.
-4. **Code uniqueness:** confirm the proposal that garment codes are unique per seller.
+## 9. Open Decisions
 
-## 7. Out of Scope for the Initial Version
+1. **Profit:** revenue only, or add an optional cost field?
+2. **Clerk sign-in method.**
+3. **Bank/gateway** for real QR payments (after the hackathon).
 
-- Public storefront or public seller profiles.
-- Payment processing.
-- n8n automations.
-- App store publication without separate authorization.
+Resolved: garment codes are unique per seller; notification events are defined in `CLAUDE.md` §6.4.
+
+## 10. Out of Scope for the Hackathon
+
+Real bank payments, reading TikTok live comments directly, shipping, invoicing, public storefront, app store
+publication.
