@@ -1,0 +1,425 @@
+{
+  "name": "lia-voucher",
+  "nodes": [
+    {
+      "id": "47f7cb58-40df-4488-8fde-996169eeb13e",
+      "name": "Start",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "inputSource": "workflowInputs",
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "phoneNumberId",
+              "type": "string"
+            },
+            {
+              "name": "from",
+              "type": "string"
+            },
+            {
+              "name": "mediaId",
+              "type": "string"
+            },
+            {
+              "name": "waMessageId",
+              "type": "string"
+            },
+            {
+              "name": "messageTs",
+              "type": "string"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "b0e78ada-c00e-42f9-a726-4d2d2fc87e11",
+      "name": "Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        220,
+        0
+      ],
+      "parameters": {
+        "mode": "manual",
+        "assignments": {
+          "assignments": [
+            {
+              "id": "d3d1b4db-cfc1-4965-b01c-898cd99d1728",
+              "name": "supabaseUrl",
+              "value": "__SUPABASE_URL__",
+              "type": "string"
+            },
+            {
+              "id": "32c6eab6-1cf7-4a81-8dc3-250c5ea1e307",
+              "name": "waGraphVersion",
+              "value": "__WA_GRAPH_VERSION__",
+              "type": "string"
+            },
+            {
+              "id": "f79d4723-b1d0-435c-995e-e3ebd286a840",
+              "name": "waVerifyToken",
+              "value": "__WA_VERIFY_TOKEN__",
+              "type": "string"
+            },
+            {
+              "id": "017f58f3-aac3-48fd-9c85-4220a5b49729",
+              "name": "payBaseUrl",
+              "value": "__N8N_BASE_URL__/webhook/lia-pay",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": false,
+        "options": {}
+      }
+    },
+    {
+      "id": "e3f198a1-cea5-4537-b048-b45b7f9dabba",
+      "name": "Download voucher",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        440,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "=https://gate.whapi.cloud/media/{{ $('Start').first().json.mediaId }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file",
+              "outputPropertyName": "data"
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "__CRED:Whapi Lia__",
+          "name": "Whapi Lia"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "ed2faa00-f5ce-4356-9dc5-87044963ed03",
+      "name": "Build AI request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const prompt = \"Esta imagen deberia ser un comprobante de pago bancario o de billetera movil de Bolivia (QR, transferencia).\\nExtrae y responde SOLO un objeto JSON con estas claves:\\n\\\"payer_name\\\": nombre completo de la persona que PAGO (ordenante / originante / remitente / \\\"de\\\"), tal como aparece; no el beneficiario.\\n\\\"amount\\\": monto pagado como numero (ej. 150.00).\\n\\\"paid_at\\\": fecha y hora del pago en ISO 8601 con zona -04:00.\\n\\\"reference\\\": numero de transaccion o comprobante.\\nSi un dato no se ve con claridad usa null. Si la imagen no es un comprobante de pago, todas las claves en null.\\nNo inventes datos.\";\nconst item = $input.first();\nif (!item.binary || !item.binary.data) return [{ json: { hasImage: false } }];\nconst buffer = await this.helpers.getBinaryDataBuffer(0, 'data');\nconst mime = item.binary.data.mimeType || 'image/jpeg';\nconst body = {\n  model: 'gpt-6-luna',\n  input: [{\n    role: 'user',\n    content: [\n      { type: 'input_text', text: prompt },\n      { type: 'input_image', image_url: `data:${mime};base64,${buffer.toString('base64')}` },\n    ],\n  }],\n};\nreturn [{ json: { hasImage: true, body } }];"
+      }
+    },
+    {
+      "id": "d537d21a-765d-41f6-b29e-26c0f63e6fc1",
+      "name": "Read voucher with AI",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        880,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/responses",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "openAiApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.body || { model: \"gpt-6-luna\", input: \"{}\" }) }}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "credentials": {
+        "openAiApi": {
+          "id": "__CRED:OpenAI Lia__",
+          "name": "OpenAI Lia"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "322fce0a-8f79-4e52-9035-8026012328e1",
+      "name": "Parse voucher",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        0
+      ],
+      "parameters": {
+        "jsCode": "//@include lia-messages.js\n\nconst hasImage = $('Build AI request').first().json.hasImage === true;\nconst response = $json || {};\nconst texts = [];\nfor (const out of response.output || []) {\n  for (const part of out.content || []) if (typeof part.text === 'string') texts.push(part.text);\n}\nif (typeof response.output_text === 'string') texts.push(response.output_text);\nconst voucher = hasImage ? parseVoucherExtraction(texts.join('\\n')) : parseVoucherExtraction('');\nreturn [{ json: { voucher, raw: { ai_text: texts.join('\\n').slice(0, 2000), has_image: hasImage } } }];"
+      }
+    },
+    {
+      "id": "1f486365-dcd9-4421-af55-3efda930f4ab",
+      "name": "RPC register voucher",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1320,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config').first().json.supabaseUrl }}/rest/v1/rpc/lia_register_voucher",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ p_wa_phone_number_id: $('Start').first().json.phoneNumberId, p_customer_phone: $('Start').first().json.from, p_payer_name: $json.voucher.payer_name, p_amount: $json.voucher.amount, p_paid_at: $json.voucher.paid_at, p_reference: $json.voucher.reference, p_voucher_url: 'whapi-media:' + $('Start').first().json.mediaId, p_raw: $json.raw }) }}",
+        "options": {}
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "__CRED:Supabase Lia__",
+          "name": "Supabase Lia"
+        }
+      }
+    },
+    {
+      "id": "afd25542-5724-4909-95d4-9ec4ca6d7d0d",
+      "name": "Build voucher reply",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1540,
+        0
+      ],
+      "parameters": {
+        "jsCode": "//@include lia-messages.js\n\nconst input = $('Start').first().json;\nconst result = $json;\nreturn [{ json: { result, body: toWhapi(buildVoucherReply(input.from, result)) } }];"
+      }
+    },
+    {
+      "id": "de28c603-cc6f-4ade-86bc-ad9af2696812",
+      "name": "Has reply",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1760,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "72653b70-988d-4548-ab9c-c5c558729bf3",
+              "leftValue": "={{ $json.body !== null && $json.body !== undefined }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      }
+    },
+    {
+      "id": "1c5ccf99-08ef-45b8-8016-d8417f3decdc",
+      "name": "Send WhatsApp",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1980,
+        -100
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "=https://gate.whapi.cloud/{{ $json.body.path }}",
+        "authentication": "genericCredentialType",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.body.body) }}",
+        "options": {},
+        "genericAuthType": "httpHeaderAuth"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "__CRED:Whapi Lia__",
+          "name": "Whapi Lia"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "5909702f-87ed-4d41-af84-b0e0d6211cc7",
+      "name": "Run dispatch",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        2200,
+        0
+      ],
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "__WF:lia-dispatch__"
+        },
+        "mode": "once",
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {
+          "waitForSubWorkflow": false
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Start": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "Download voucher",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download voucher": {
+      "main": [
+        [
+          {
+            "node": "Build AI request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build AI request": {
+      "main": [
+        [
+          {
+            "node": "Read voucher with AI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read voucher with AI": {
+      "main": [
+        [
+          {
+            "node": "Parse voucher",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse voucher": {
+      "main": [
+        [
+          {
+            "node": "RPC register voucher",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RPC register voucher": {
+      "main": [
+        [
+          {
+            "node": "Build voucher reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build voucher reply": {
+      "main": [
+        [
+          {
+            "node": "Has reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has reply": {
+      "main": [
+        [
+          {
+            "node": "Send WhatsApp",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Run dispatch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send WhatsApp": {
+      "main": [
+        [
+          {
+            "node": "Run dispatch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/La_Paz"
+  }
+}

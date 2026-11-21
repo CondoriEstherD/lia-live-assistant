@@ -347,6 +347,30 @@
               },
               "renameOutput": true,
               "outputKey": "unsupported"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "b4780ddd-90e3-4534-8e63-e8b59db99060",
+                    "leftValue": "={{ $json.route }}",
+                    "rightValue": "voucher",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "voucher"
             }
           ]
         },
@@ -959,6 +983,93 @@
           "name": "Whapi Lia"
         }
       }
+    },
+    {
+      "id": "67ce5eef-2b85-470a-b6d8-034882fbd37e",
+      "name": "Run voucher",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        1360,
+        1240
+      ],
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "__WF:lia-voucher__"
+        },
+        "mode": "each",
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "phoneNumberId": "={{ $json.phoneNumberId }}",
+            "from": "={{ $json.from }}",
+            "mediaId": "={{ $json.mediaId }}",
+            "waMessageId": "={{ $json.waMessageId }}",
+            "messageTs": "={{ $json.messageTs }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "phoneNumberId",
+              "displayName": "phoneNumberId",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "from",
+              "displayName": "from",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "mediaId",
+              "displayName": "mediaId",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "waMessageId",
+              "displayName": "waMessageId",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "messageTs",
+              "displayName": "messageTs",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {
+          "waitForSubWorkflow": false
+        }
+      }
     }
   ],
   "connections": {
@@ -1086,6 +1197,13 @@
         [
           {
             "node": "Build unsupported reply",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Run voucher",
             "type": "main",
             "index": 0
           }

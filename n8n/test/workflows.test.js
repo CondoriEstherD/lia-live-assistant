@@ -7,7 +7,7 @@ const path = require('node:path');
 const WORKFLOWS_DIR = path.join(__dirname, '..', 'workflows');
 const EXPECTED = [
   'lia-customer-status', 'lia-dispatch', 'lia-expiry', 'lia-inbound',
-  'lia-pay', 'lia-request-garment', 'lia-search-catalog',
+  'lia-pay', 'lia-request-garment', 'lia-search-catalog', 'lia-voucher',
 ];
 const TRIGGER_TYPES = /(webhook|scheduleTrigger|executeWorkflowTrigger|Trigger)$/i;
 
