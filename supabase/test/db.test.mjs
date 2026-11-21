@@ -476,3 +476,16 @@ test('demo seed for the seller app runs twice without duplicating data', async (
     (await db.query(`select amount from sales where voided_at is null`)).rows);
   assert.equal(rows.length, 7, 'the seller app sees its sales for the dashboard');
 });
+
+test('catalog photo seed adds 8 garments with photos once', async () => {
+  const { db } = await freshDb();
+  const seedDir = path.join(migrationsDir, '..', 'seed');
+  await db.exec(readFileSync(path.join(seedDir, 'demo_ilse_boutique.sql'), 'utf8'));
+  const catalog = readFileSync(path.join(seedDir, 'demo_ilse_catalog_photos.sql'), 'utf8');
+  await db.exec(catalog);
+  await db.exec(catalog);
+  const rows = (await db.query(`select code, photo_url from garments g join sellers s on s.id = g.seller_id
+    where s.clerk_user_id = 'user_3MQXdU9imTocAfTOPCJS5AVojpO' and code in ('P01','P02','P03','P04','P05','T01','T02','T03')`)).rows;
+  assert.equal(rows.length, 8);
+  for (const r of rows) assert.ok(r.photo_url.endsWith(`/catalog/${r.code}.jpg`), r.code);
+});
