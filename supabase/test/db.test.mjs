@@ -454,3 +454,25 @@ test('only n8n can register vouchers', async () => {
     await db.exec(`reset role`);
   }
 });
+
+test('demo seed for the seller app runs twice without duplicating data', async () => {
+  const { db } = await freshDb();
+  const seed = readFileSync(path.join(migrationsDir, '..', 'seed', 'demo_ilse_boutique.sql'), 'utf8');
+  await db.exec(seed);
+  await db.exec(seed);
+
+  const seller = await one(db, `select id, wa_phone_number_id from sellers where clerk_user_id = 'user_3MQXdU9imTocAfTOPCJS5AVojpO'`);
+  assert.equal(seller.wa_phone_number_id, 'HULKBR-4WGWP');
+  assert.equal((await one(db, `select count(*)::int as n from garments where seller_id = $1`, [seller.id])).n, 8);
+  assert.equal((await one(db, `select count(*)::int as n from garments where seller_id = $1 and photo_url is null`, [seller.id])).n, 0);
+  assert.equal((await one(db, `select count(*)::int as n from sales where seller_id = $1`, [seller.id])).n, 7);
+  assert.equal((await one(db, `select count(*)::int as n from sales where seller_id = $1 and channel = 'whatsapp'
+    and (customer_phone is null or customer_name is null or name_source <> 'voucher')`, [seller.id])).n, 0);
+  assert.equal((await one(db, `select count(*)::int as n from live_sessions where seller_id = $1 and status = 'active'`, [seller.id])).n, 1);
+  const claimed = (await db.query(`select * from lia_claim_notifications(50)`)).rows;
+  assert.equal(claimed.length, 0, 'seed notifications are never sent by n8n');
+
+  const rows = await asSeller(db, 'user_3MQXdU9imTocAfTOPCJS5AVojpO', async () =>
+    (await db.query(`select amount from sales where voided_at is null`)).rows);
+  assert.equal(rows.length, 7, 'the seller app sees its sales for the dashboard');
+});
