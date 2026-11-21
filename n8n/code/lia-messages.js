@@ -23,6 +23,25 @@ function formatTime(iso, config = DEFAULT_CONFIG) {
   }).format(new Date(iso));
 }
 
+function formatDateTime(iso, config = DEFAULT_CONFIG) {
+  const parts = new Intl.DateTimeFormat('es-BO', {
+    timeZone: config.timeZone,
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).formatToParts(new Date(iso));
+  const get = (type) => parts.find((p) => p.type === type)?.value;
+  return `${get('day')}/${get('month')}/${get('year')} ${get('hour')}:${get('minute')}`;
+}
+
+function buyerLine(p) {
+  const phone = p.customer_phone ? `+${String(p.customer_phone).replace(/^\+/, '')}` : '';
+  return [p.customer_name, phone].filter(Boolean).join(' · ');
+}
+
 function garmentLabel(garment) {
   const parts = [garment.code];
   if (garment.name && garment.name !== garment.code) parts.push(garment.name);
@@ -112,7 +131,7 @@ function buildConfirmReply(to, result) {
 
 /** Builds the WhatsApp body for one outbox notification (lia_pending_notifications row). */
 function buildNotificationMessage(notification, config = DEFAULT_CONFIG) {
-  const to = notification.customer_phone;
+  const to = notification.to_phone ?? notification.customer_phone;
   const p = notification.payload ?? {};
   const g = p.garment ?? {};
 
@@ -131,7 +150,24 @@ function buildNotificationMessage(notification, config = DEFAULT_CONFIG) {
     case 'payment_reminder':
       return text(to, `Lia: te queda 1 minuto para pagar la ${g.code} (hasta las ${formatTime(p.expires_at, config)}).`);
     case 'payment_confirmed':
-      return text(to, `Lia: ¡pago confirmado! La ${garmentLabel(g)} es tuya. La tienda te contactará para la entrega.`);
+      return text(
+        to,
+        `Lia: ¡pago confirmado! La ${garmentLabel(g)} es tuya.\n` +
+          `A nombre de: ${buyerLine(p)}\n` +
+          `Monto: ${formatAmount(p.amount, config)}\n` +
+          (p.paid_at ? `Fecha de pago: ${formatDateTime(p.paid_at, config)}\n` : '') +
+          'La tienda te contactará para la entrega.',
+      );
+    case 'garment_sold':
+      return text(
+        to,
+        `Lia: ¡vendiste la ${garmentLabel(g)}!\n` +
+          `Compradora: ${buyerLine(p)}\n` +
+          `Monto: ${formatAmount(p.amount, config)}\n` +
+          (p.paid_at ? `Fecha de pago: ${formatDateTime(p.paid_at, config)}` : ''),
+      );
+    case 'late_payment':
+      return text(to, `Lia: llegó un pago tardío de ${formatAmount(p.amount, config)} por la ${g.code}. Revísalo en la app.`);
     case 'qr_expired':
       return text(to, `Lia: tu QR de la ${g.code} venció y ya no se puede pagar. La prenda pasó a la siguiente persona de la fila.`);
     case 'sold_out':
@@ -149,6 +185,7 @@ module.exports = {
   DEFAULT_CONFIG,
   formatAmount,
   formatTime,
+  formatDateTime,
   payUrl,
   qrImageUrl,
   buildPreviewMessage,

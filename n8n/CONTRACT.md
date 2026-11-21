@@ -54,7 +54,8 @@ Respuesta: `{ items: [{ code, name, status, expires_at, position }] }` — pedid
 Sin parámetros. Respuesta: `{ expired, cancelled, reminders, promoted }` (contadores).
 
 ### `lia_claim_notifications`
-Parámetros: `p_limit`. **Devuelve filas** `{ id, kind, payload, customer_phone, wa_phone_number_id }`
+Parámetros: `p_limit`. **Devuelve filas** `{ id, kind, payload, customer_phone, wa_phone_number_id, audience, to_phone }`
+(`to_phone` es el número de destino: la compradora, o la vendedora para `garment_sold` y `late_payment`)
 y las marca como tomadas (`claimed_at`) en la misma transacción (`for update skip locked`), para que
 dos ejecuciones de n8n no envíen el mismo mensaje. Una notificación tomada y no enviada vuelve a estar
 disponible después de 2 minutos.
@@ -69,13 +70,14 @@ Tipos (`kind`) y su `payload`:
 | `reservation_qr` | `reservation_id`, `qr_token`, `amount`, `expires_at`, `garment` |
 | `queued` | `reservation_id`, `position`, `garment` |
 | `payment_reminder` | `reservation_id`, `expires_at`, `garment` |
-| `payment_confirmed` | `reservation_id`, `amount`, `garment` |
+| `payment_confirmed` | `reservation_id`, `amount`, `paid_at`, `customer_name`, `customer_phone`, `garment` |
+| `garment_sold` (a la vendedora) | `reservation_id`, `amount`, `paid_at`, `customer_name`, `customer_phone`, `garment` |
 | `qr_expired` | `reservation_id`, `garment` |
 | `sold_out` | `reservation_id`, `garment` |
 | `confirmation_expired` | `reservation_id`, `garment` |
 | `live_ended` | `reservation_id`, `garment` |
 
-Las notificaciones para la vendedora (`garment_sold`, `late_payment`) no pasan por n8n: las lee la app.
+Las notificaciones para la vendedora (`garment_sold`, `late_payment`) las envía n8n por WhatsApp al número de la vendedora y también las lee la app.
 
 ## Pago simulado (Lia Pay)
 

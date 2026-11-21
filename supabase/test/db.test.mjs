@@ -367,3 +367,54 @@ test('the buyer has 1 minute to confirm the photo; the QR is sent only after con
   assert.equal((await confirm(db, 'bea', at(61))).status, 'confirmation_expired');
   assert.equal((await one(db, `select count(*)::int as n from payment_qrs`)).n, 1, 'late confirmation gets no QR');
 });
+
+test('a confirmed payment keeps the buyer name and phone and tells the seller through n8n', async () => {
+  const { db, sellerId } = await freshDb();
+  await addGarment(db, sellerId, 'A12');
+  await rpc(db, 'lia_request_garment', {
+    p_wa_phone_number_id: WA, p_customer_phone: '59171111111', p_customer_name: 'Ana Pérez', p_code: 'A12',
+    p_wa_message_id: 'wamid.buyer1', p_message_ts: at(0), p_now: at(0),
+  });
+  const conf = await confirm(db, '59171111111', at(10));
+  assert.equal((await pay(db, await qrToken(db, conf.reservation_id), at(30))).status, 'paid');
+
+  const sale = await one(db, `select customer_name, customer_phone from sales`);
+  assert.deepEqual(sale, { customer_name: 'Ana Pérez', customer_phone: '59171111111' });
+
+  const [paid] = await notifications(db, 'payment_confirmed');
+  assert.equal(paid.payload.customer_name, 'Ana Pérez');
+  assert.equal(paid.payload.customer_phone, '59171111111');
+
+  const claimed = (await db.query(`select * from lia_claim_notifications(20, $1)`, [at(31)])).rows;
+  const toSeller = claimed.find((n) => n.kind === 'garment_sold');
+  assert.ok(toSeller, 'garment_sold is delivered by n8n');
+  assert.equal(toSeller.audience, 'seller');
+  assert.equal(toSeller.to_phone, '59170000000');
+  assert.equal(toSeller.payload.customer_name, 'Ana Pérez');
+  assert.equal(toSeller.payload.customer_phone, '59171111111');
+  const toBuyer = claimed.find((n) => n.kind === 'payment_confirmed');
+  assert.equal(toBuyer.to_phone, '59171111111');
+});
+
+test('the seller app sees who bought and the payment date of each sale', async () => {
+  const { db, sellerId } = await freshDb();
+  await addGarment(db, sellerId, 'A12');
+  await rpc(db, 'lia_request_garment', {
+    p_wa_phone_number_id: WA, p_customer_phone: '59171111111', p_customer_name: 'Ana Pérez', p_code: 'A12',
+    p_wa_message_id: 'wamid.app1', p_message_ts: at(0), p_now: at(0),
+  });
+  const conf = await confirm(db, '59171111111', at(10));
+  await pay(db, await qrToken(db, conf.reservation_id), at(30));
+
+  const rows = await asSeller(db, 'user_1', async () =>
+    (await db.query(`select customer_name, customer_phone, sold_at from sales`)).rows);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].customer_name, 'Ana Pérez');
+  assert.equal(rows[0].customer_phone, '59171111111');
+  assert.equal(new Date(rows[0].sold_at).toISOString(), at(30), 'sale date is the payment date');
+
+  for (const kind of ['payment_confirmed', 'garment_sold']) {
+    const [n] = await notifications(db, kind);
+    assert.equal(new Date(n.payload.paid_at).toISOString(), at(30), `${kind} carries the payment date`);
+  }
+});

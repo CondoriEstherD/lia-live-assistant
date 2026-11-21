@@ -151,3 +151,27 @@ test('garment preview tells the buyer she has 1 minute to confirm', () => {
   });
   assert.match(msg.interactive.body.text, /Confirma antes de las 20:36 \(1 minuto\)/);
 });
+
+test('payment confirmation shows the buyer name and phone', () => {
+  const msg = buildNotificationMessage({
+    kind: 'payment_confirmed', to_phone: '59171111111', customer_phone: '59171111111',
+    payload: { amount: 150, paid_at: '2026-11-22T00:35:00Z', customer_name: 'Ana Pérez', customer_phone: '59171111111', garment },
+  });
+  assert.equal(msg.to, '59171111111');
+  assert.match(msg.text.body, /Ana Pérez/);
+  assert.match(msg.text.body, /\+59171111111/);
+  assert.match(msg.text.body, /Fecha de pago: 21.11.2026 20:35/);
+});
+
+test('the seller gets who bought: name, phone, garment and amount', () => {
+  const msg = buildNotificationMessage({
+    kind: 'garment_sold', audience: 'seller', to_phone: '59170000000',
+    payload: { amount: 150, paid_at: '2026-11-22T00:35:00Z', customer_name: 'Ana Pérez', customer_phone: '59171111111', garment },
+  });
+  assert.equal(msg.to, '59170000000');
+  assert.match(msg.text.body, /A12/);
+  assert.match(msg.text.body, /Ana Pérez/);
+  assert.match(msg.text.body, /\+59171111111/);
+  assert.match(msg.text.body, /Bs 150,00/);
+  assert.match(msg.text.body, /Fecha de pago: 21.11.2026 20:35/);
+});

@@ -98,6 +98,10 @@ Confirmar con la foto antes de reservar es obligatorio: resuelve el "me equivoqu
   - si la prenda sigue libre → se le puede asignar (decide la vendedora o una regla automática);
   - si ya la ganó otra → se ofrece otra prenda/talla, saldo a favor o devolución (manual).
 - **R6 — Límite por clienta:** máximo N reservas activas simultáneas por clienta (evita acaparar).
+- **R8 — Quién compró y cuándo:** al confirmarse el pago, la venta guarda el **nombre** (el de WhatsApp) y el
+  **teléfono** de la compradora (el teléfono es su identificador único) y la **fecha y hora del pago**. Esos tres datos
+  aparecen en el mensaje de pago confirmado a la compradora, en el aviso por WhatsApp a la vendedora (enviado por n8n)
+  y en la app móvil (tabla `sales`: `customer_name`, `customer_phone`, `sold_at`).
 - **R7 — Auditoría:** cada mensaje y cada cambio de estado se guarda (tabla `events`). Ante un reclamo
   se demuestra quién llegó primero.
 
