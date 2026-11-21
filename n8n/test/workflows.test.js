@@ -106,3 +106,21 @@ for (const file of files) {
     }
   });
 }
+
+test('lia-pay sends the payment notifications right after confirming the payment', () => {
+  const wf = JSON.parse(fs.readFileSync(path.join(WORKFLOWS_DIR, 'lia-pay.json'), 'utf8'));
+  const dispatch = wf.nodes.find((n) => n.type === 'n8n-nodes-base.executeWorkflow'
+    && JSON.stringify(n.parameters.workflowId).includes('__WF:lia-dispatch__'));
+  assert.ok(dispatch, 'lia-pay has an Execute Workflow node for lia-dispatch');
+  const next = (name) => (wf.connections[name]?.main ?? []).flat().map((l) => l.node);
+  const seen = new Set();
+  const queue = ['RPC confirm payment'];
+  while (queue.length) {
+    const n = queue.shift();
+    if (seen.has(n)) continue;
+    seen.add(n);
+    queue.push(...next(n));
+  }
+  assert.ok(seen.has(dispatch.name), 'lia-dispatch runs after RPC confirm payment');
+  assert.equal(dispatch.parameters.options?.waitForSubWorkflow, false, 'the payment page does not wait for WhatsApp');
+});

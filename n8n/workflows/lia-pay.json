@@ -212,6 +212,36 @@
           }
         }
       }
+    },
+    {
+      "id": "b022605f-f11d-402b-840d-e3e95883189f",
+      "name": "Run dispatch",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        660,
+        500
+      ],
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "__WF:lia-dispatch__"
+        },
+        "mode": "once",
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {
+          "waitForSubWorkflow": false
+        }
+      }
     }
   ],
   "connections": {
@@ -275,6 +305,11 @@
         [
           {
             "node": "RPC get QR after pay",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Run dispatch",
             "type": "main",
             "index": 0
           }
