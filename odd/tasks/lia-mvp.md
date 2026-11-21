@@ -19,7 +19,7 @@ Branch: `feat/lia-mvp` · Delivery: ask-on-risk · Test runner: `npm test` (node
 | ID | Specs | Route | Status | Commit |
 |---|---|---|---|---|
 | T1 | S1, S2, S8 | inline | done | docs commit |
-| T2 | S2–S6 | — | paused by user (L4); draft SQL left uncommitted in `supabase/` | — |
+| T2 | S2–S6 | inline | done: 3 migrations + `supabase/scripts/push.mjs` + 13 PGlite tests; not applied to Supabase yet | db commit |
 | T3 | S3–S6 | inline | n8n guide, contract, node code + tests done; workflows still to build in n8n | n8n commit |
 | T4 | S5, S7 | inline | pay page code done (`n8n/code/lia-pay-page.js`); WF5 to build in n8n | n8n commit |
 | T5 | S1, S8 | inline | pending | — |
@@ -39,3 +39,5 @@ Branch: `feat/lia-mvp` · Delivery: ask-on-risk · Test runner: `npm test` (node
 - L4 (2026-11-21, user, verbatim): "continua peor no hagas la base de datos quiero que prepares realizando, la parte de n8n, para la parte del eagente tambien tenemos que agregar, como lo vamos hacer".
 - L5 — n8n prepared: `n8n/README.md` (5 workflows), `n8n/CONTRACT.md` (RPC contract incl. new `lia_cancel_request`, `lia_search_catalog`, `lia_customer_status`, `lia_claim_notifications`), agent prompt, node code with 14 passing tests (`npm test`). Tests were written after the code (no RED observed). Workflows not built or run in n8n yet (no n8n instance here).
 - L6 — 7 workflow JSONs written by 3 parallel subagents (disjoint files) + `n8n/scripts/deploy.mjs` + structure tests: `npm test` 31/31 pass, `--dry-run` renders all. Not imported into n8n yet (waiting for API key in ~/.lia-n8n-key). Unconfirmed node typeVersions noted by subagents (webhook 2, set 3.4, if 2.2, switch 3.2, httpRequest 4.2, agent 2.2, lmChatAnthropic 1.3, toolWorkflow 2.2); first import will validate them. Known gap: lia-pay has no error response when Supabase fails.
+- L7 (2026-11-21, user, verbatim): "no haslo desde cero, preo se muyc uidaodo con la base de datos para que el scrip lo suba a supabase, rapido". The earlier uncommitted draft in `supabase/` had disappeared from disk (never committed), so T2 was rebuilt from scratch against `n8n/CONTRACT.md`.
+- L8 — T2: `supabase/migrations/2026112100000{1,2,3}` (schema, functions incl. app `start_live`/`end_live`/`record_manual_sale`/`void_sale`, RLS + grants). `npm run db:push` applies them through the Management API (`POST /v1/projects/{ref}/database/query`), one transaction per migration, tracked in `lia_schema_migrations` with checksums; refuses to run over an untracked existing schema. `npm test` 44/44 (13 SQL on PGlite); a mutation of R4 made 1 test fail. Not applied to a real project (needs SUPABASE_ACCESS_TOKEN + SUPABASE_PROJECT_REF in .env). Storage bucket for photos not created yet.

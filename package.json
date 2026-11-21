@@ -3,6 +3,11 @@
   "private": true,
   "description": "Lia (Live Interactive Assistant): WhatsApp sales agent for TikTok live shopping.",
   "scripts": {
-    "test": "node --test n8n/test/"
+    "test": "node --test n8n/test/ supabase/test/",
+    "db:push": "node supabase/scripts/push.mjs",
+    "db:push:dry": "node supabase/scripts/push.mjs --dry-run"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.5.17"
   }
 }
