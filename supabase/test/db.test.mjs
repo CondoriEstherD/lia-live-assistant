@@ -368,53 +368,89 @@ test('the buyer has 1 minute to confirm the photo; the QR is sent only after con
   assert.equal((await one(db, `select count(*)::int as n from payment_qrs`)).n, 1, 'late confirmation gets no QR');
 });
 
-test('a confirmed payment keeps the buyer name and phone and tells the seller through n8n', async () => {
-  const { db, sellerId } = await freshDb();
+async function paidSale(db, sellerId, { phone = '59171111111', profileName = 'Anita 💕', at: paidAt = at(30) } = {}) {
   await addGarment(db, sellerId, 'A12');
   await rpc(db, 'lia_request_garment', {
-    p_wa_phone_number_id: WA, p_customer_phone: '59171111111', p_customer_name: 'Ana Pérez', p_code: 'A12',
-    p_wa_message_id: 'wamid.buyer1', p_message_ts: at(0), p_now: at(0),
+    p_wa_phone_number_id: WA, p_customer_phone: phone, p_customer_name: profileName, p_code: 'A12',
+    p_wa_message_id: `wamid.${++msg}`, p_message_ts: at(0), p_now: at(0),
   });
-  const conf = await confirm(db, '59171111111', at(10));
-  assert.equal((await pay(db, await qrToken(db, conf.reservation_id), at(30))).status, 'paid');
+  const conf = await confirm(db, phone, at(10));
+  assert.equal((await pay(db, await qrToken(db, conf.reservation_id), paidAt)).status, 'paid');
+}
 
-  const sale = await one(db, `select customer_name, customer_phone from sales`);
-  assert.deepEqual(sale, { customer_name: 'Ana Pérez', customer_phone: '59171111111' });
-
-  const [paid] = await notifications(db, 'payment_confirmed');
-  assert.equal(paid.payload.customer_name, 'Ana Pérez');
-  assert.equal(paid.payload.customer_phone, '59171111111');
-
-  const claimed = (await db.query(`select * from lia_claim_notifications(20, $1)`, [at(31)])).rows;
-  const toSeller = claimed.find((n) => n.kind === 'garment_sold');
-  assert.ok(toSeller, 'garment_sold is delivered by n8n');
-  assert.equal(toSeller.audience, 'seller');
-  assert.equal(toSeller.to_phone, '59170000000');
-  assert.equal(toSeller.payload.customer_name, 'Ana Pérez');
-  assert.equal(toSeller.payload.customer_phone, '59171111111');
-  const toBuyer = claimed.find((n) => n.kind === 'payment_confirmed');
-  assert.equal(toBuyer.to_phone, '59171111111');
+const voucher = (db, args) => rpc(db, 'lia_register_voucher', {
+  p_wa_phone_number_id: WA, p_customer_phone: '59171111111', p_payer_name: 'Ana María Pérez Rojas',
+  p_amount: 150, p_paid_at: at(28), p_reference: 'TRX-001', p_voucher_url: 'wa-media:123',
+  p_raw: { source: 'test' }, p_now: at(60), ...args,
 });
 
-test('the seller app sees who bought and the payment date of each sale', async () => {
+test('a confirmed payment keeps the buyer phone and payment date; the name waits for the voucher', async () => {
   const { db, sellerId } = await freshDb();
-  await addGarment(db, sellerId, 'A12');
-  await rpc(db, 'lia_request_garment', {
-    p_wa_phone_number_id: WA, p_customer_phone: '59171111111', p_customer_name: 'Ana Pérez', p_code: 'A12',
-    p_wa_message_id: 'wamid.app1', p_message_ts: at(0), p_now: at(0),
-  });
-  const conf = await confirm(db, '59171111111', at(10));
-  await pay(db, await qrToken(db, conf.reservation_id), at(30));
+  await paidSale(db, sellerId);
+
+  const sale = await one(db, `select customer_name, customer_phone, name_source, sold_at from sales`);
+  assert.equal(sale.customer_name, null, 'the WhatsApp profile name is never used as the buyer name');
+  assert.equal(sale.name_source, null);
+  assert.equal(sale.customer_phone, '59171111111');
+  assert.equal(new Date(sale.sold_at).toISOString(), at(30));
+
+  const [paid] = await notifications(db, 'payment_confirmed');
+  assert.equal(paid.payload.customer_phone, '59171111111');
+  assert.equal(new Date(paid.payload.paid_at).toISOString(), at(30));
+  assert.equal(paid.payload.customer_name, undefined);
+});
+
+test('the buyer name comes from the payment voucher and reaches buyer, seller (n8n) and the app', async () => {
+  const { db, sellerId } = await freshDb();
+  await paidSale(db, sellerId);
+
+  const result = await voucher(db, {});
+  assert.equal(result.status, 'registered');
+  assert.equal(result.customer_name, 'Ana María Pérez Rojas');
+
+  const sale = await one(db, `select customer_name, name_source, voucher_reference from sales`);
+  assert.deepEqual(sale, { customer_name: 'Ana María Pérez Rojas', name_source: 'voucher', voucher_reference: 'TRX-001' });
+
+  const claimed = (await db.query(`select * from lia_claim_notifications(20, $1)`, [at(61)])).rows;
+  const toSeller = claimed.find((n) => n.kind === 'buyer_identified');
+  assert.equal(toSeller.audience, 'seller');
+  assert.equal(toSeller.to_phone, '59170000000');
+  assert.equal(toSeller.payload.customer_name, 'Ana María Pérez Rojas');
+  assert.equal(toSeller.payload.customer_phone, '59171111111');
+  assert.equal(new Date(toSeller.payload.paid_at).toISOString(), at(30));
+  const toBuyer = claimed.find((n) => n.kind === 'voucher_registered');
+  assert.equal(toBuyer.to_phone, '59171111111');
+  assert.equal(toBuyer.payload.customer_name, 'Ana María Pérez Rojas');
 
   const rows = await asSeller(db, 'user_1', async () =>
-    (await db.query(`select customer_name, customer_phone, sold_at from sales`)).rows);
-  assert.equal(rows.length, 1);
-  assert.equal(rows[0].customer_name, 'Ana Pérez');
+    (await db.query(`select customer_name, customer_phone, sold_at, name_source from sales`)).rows);
+  assert.equal(rows[0].customer_name, 'Ana María Pérez Rojas');
   assert.equal(rows[0].customer_phone, '59171111111');
-  assert.equal(new Date(rows[0].sold_at).toISOString(), at(30), 'sale date is the payment date');
+  assert.equal(rows[0].name_source, 'voucher');
+  assert.equal(new Date(rows[0].sold_at).toISOString(), at(30));
+});
 
-  for (const kind of ['payment_confirmed', 'garment_sold']) {
-    const [n] = await notifications(db, kind);
-    assert.equal(new Date(n.payload.paid_at).toISOString(), at(30), `${kind} carries the payment date`);
+test('a voucher with another amount, no name or no paid sale does not set the buyer name', async () => {
+  const { db, sellerId } = await freshDb();
+  assert.equal((await voucher(db, {})).status, 'no_sale');
+
+  await paidSale(db, sellerId);
+  assert.equal((await voucher(db, { p_amount: 90 })).status, 'amount_mismatch');
+  assert.equal((await voucher(db, { p_payer_name: '  ' })).status, 'name_missing');
+  assert.equal((await one(db, `select customer_name from sales`)).customer_name, null);
+  assert.equal((await notifications(db, 'voucher_review')).length, 1, 'seller is told to review the wrong amount');
+
+  assert.equal((await voucher(db, {})).status, 'registered');
+  assert.equal((await voucher(db, { p_payer_name: 'Otra Persona' })).status, 'already_registered');
+  assert.equal((await one(db, `select customer_name from sales`)).customer_name, 'Ana María Pérez Rojas');
+});
+
+test('only n8n can register vouchers', async () => {
+  const { db } = await freshDb();
+  for (const role of ['anon', 'authenticated']) {
+    await db.exec(`set role ${role}`);
+    await assert.rejects(
+      db.query(`select lia_register_voucher('x','y','z',1,now(),null,null,'{}'::jsonb,now())`), /permission denied/);
+    await db.exec(`reset role`);
   }
 });

@@ -121,7 +121,7 @@
         0
       ],
       "parameters": {
-        "jsCode": "//@include lia-messages.js\n\nconst input = $('Start').first().json;\nconst cfg = $('Config').first().json;\nconst result = $('RPC request garment').first().json;\nconst config = { ...DEFAULT_CONFIG, payBaseUrl: cfg.payBaseUrl };\nreturn [{ json: { result, body: buildRequestReply(input.from, result, config) } }];"
+        "jsCode": "//@include lia-messages.js\n\nconst input = $('Start').first().json;\nconst cfg = $('Config').first().json;\nconst result = $('RPC request garment').first().json;\nconst config = { ...DEFAULT_CONFIG, payBaseUrl: cfg.payBaseUrl };\nreturn [{ json: { result, body: toWhapi(buildRequestReply(input.from, result, config)) } }];"
       }
     },
     {
@@ -170,18 +170,18 @@
       ],
       "parameters": {
         "method": "POST",
-        "url": "=https://graph.facebook.com/{{ $('Config').first().json.waGraphVersion }}/{{ $('Start').first().json.phoneNumberId }}/messages",
-        "authentication": "predefinedCredentialType",
-        "nodeCredentialType": "whatsAppApi",
+        "url": "=https://gate.whapi.cloud/{{ $json.body.path }}",
+        "authentication": "genericCredentialType",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify($json.body) }}",
-        "options": {}
+        "jsonBody": "={{ JSON.stringify($json.body.body) }}",
+        "options": {},
+        "genericAuthType": "httpHeaderAuth"
       },
       "credentials": {
-        "whatsAppApi": {
-          "id": "__CRED:WhatsApp Lia__",
-          "name": "WhatsApp Lia"
+        "httpHeaderAuth": {
+          "id": "__CRED:Whapi Lia__",
+          "name": "Whapi Lia"
         }
       },
       "onError": "continueRegularOutput"

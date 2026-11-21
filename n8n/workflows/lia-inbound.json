@@ -488,7 +488,7 @@
       ],
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "//@include lia-messages.js\n\nconst msg = $('Parse message').first().json;\nreturn { json: { phoneNumberId: msg.phoneNumberId, message: buildConfirmReply(msg.from, $json) } };"
+        "jsCode": "//@include lia-messages.js\n\nconst msg = $('Parse message').first().json;\nreturn { json: { phoneNumberId: msg.phoneNumberId, message: toWhapi(buildConfirmReply(msg.from, $json)) } };"
       }
     },
     {
@@ -536,18 +536,18 @@
       ],
       "parameters": {
         "method": "POST",
-        "url": "=https://graph.facebook.com/{{ $('Config').first().json.waGraphVersion }}/{{ $json.phoneNumberId }}/messages",
-        "authentication": "predefinedCredentialType",
-        "nodeCredentialType": "whatsAppApi",
+        "url": "=https://gate.whapi.cloud/{{ $json.message.path }}",
+        "authentication": "genericCredentialType",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify($json.message) }}",
-        "options": {}
+        "jsonBody": "={{ JSON.stringify($json.message.body) }}",
+        "options": {},
+        "genericAuthType": "httpHeaderAuth"
       },
       "credentials": {
-        "whatsAppApi": {
-          "id": "__CRED:WhatsApp Lia__",
-          "name": "WhatsApp Lia"
+        "httpHeaderAuth": {
+          "id": "__CRED:Whapi Lia__",
+          "name": "Whapi Lia"
         }
       }
     },
@@ -618,7 +618,7 @@
       ],
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "//@include lia-messages.js\n\nconst msg = $('Parse message').first().json;\nconst message = $json.status === 'cancelled'\n  ? text(msg.from, 'Lia: listo, escribe el código de la prenda que quieres.')\n  : null;\nreturn { json: { phoneNumberId: msg.phoneNumberId, message } };"
+        "jsCode": "//@include lia-messages.js\n\nconst msg = $('Parse message').first().json;\nconst message = $json.status === 'cancelled'\n  ? text(msg.from, 'Lia: listo, escribe el código de la prenda que quieres.')\n  : null;\nreturn { json: { phoneNumberId: msg.phoneNumberId, message: toWhapi(message) } };"
       }
     },
     {
@@ -917,7 +917,7 @@
       ],
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "//@include lia-messages.js\n\nconst msg = $('Parse message').first().json;\nreturn { json: { phoneNumberId: msg.phoneNumberId, message: text(msg.from, String($json.output ?? '')) } };"
+        "jsCode": "//@include lia-messages.js\n\nconst msg = $('Parse message').first().json;\nreturn { json: { phoneNumberId: msg.phoneNumberId, message: toWhapi(text(msg.from, String($json.output ?? ''))) } };"
       }
     },
     {
@@ -931,7 +931,7 @@
       ],
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "//@include lia-messages.js\n\nreturn {\n  json: {\n    phoneNumberId: $json.phoneNumberId,\n    message: text($json.from, 'Lia: por ahora solo leo texto. Escribe el código de la prenda.'),\n  },\n};"
+        "jsCode": "//@include lia-messages.js\n\nreturn {\n  json: {\n    phoneNumberId: $json.phoneNumberId,\n    message: toWhapi(text($json.from, 'Lia: por ahora solo leo texto. Escribe el código de la prenda.')),\n  },\n};"
       }
     },
     {
@@ -945,18 +945,18 @@
       ],
       "parameters": {
         "method": "POST",
-        "url": "=https://graph.facebook.com/{{ $('Config').first().json.waGraphVersion }}/{{ $json.phoneNumberId }}/messages",
-        "authentication": "predefinedCredentialType",
-        "nodeCredentialType": "whatsAppApi",
+        "url": "=https://gate.whapi.cloud/{{ $json.message.path }}",
+        "authentication": "genericCredentialType",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify($json.message) }}",
-        "options": {}
+        "jsonBody": "={{ JSON.stringify($json.message.body) }}",
+        "options": {},
+        "genericAuthType": "httpHeaderAuth"
       },
       "credentials": {
-        "whatsAppApi": {
-          "id": "__CRED:WhatsApp Lia__",
-          "name": "WhatsApp Lia"
+        "httpHeaderAuth": {
+          "id": "__CRED:Whapi Lia__",
+          "name": "Whapi Lia"
         }
       }
     }

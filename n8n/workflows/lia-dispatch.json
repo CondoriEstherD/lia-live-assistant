@@ -115,7 +115,7 @@
         0
       ],
       "parameters": {
-        "jsCode": "//@include lia-messages.js\n\n// The HTTP node already splits the returned rows array into one item per row.\nconst cfg = $('Config').first().json;\nconst config = { ...DEFAULT_CONFIG, payBaseUrl: cfg.payBaseUrl };\nreturn $input.all()\n  .map((item, index) => ({ row: item.json, index }))\n  .filter(({ row }) => row && row.id !== undefined && row.id !== null)\n  .map(({ row, index }) => ({\n    json: { notification: row, body: buildNotificationMessage(row, config) },\n    pairedItem: { item: index },\n  }));"
+        "jsCode": "//@include lia-messages.js\n\n// The HTTP node already splits the returned rows array into one item per row.\nconst cfg = $('Config').first().json;\nconst config = { ...DEFAULT_CONFIG, payBaseUrl: cfg.payBaseUrl };\nreturn $input.all()\n  .map((item, index) => ({ row: item.json, index }))\n  .filter(({ row }) => row && row.id !== undefined && row.id !== null)\n  .map(({ row, index }) => ({\n    json: { notification: row, body: toWhapi(buildNotificationMessage(row, config)) },\n    pairedItem: { item: index },\n  }));"
       }
     },
     {
@@ -164,18 +164,18 @@
       ],
       "parameters": {
         "method": "POST",
-        "url": "=https://graph.facebook.com/{{ $('Config').first().json.waGraphVersion }}/{{ $json.notification.wa_phone_number_id }}/messages",
-        "authentication": "predefinedCredentialType",
-        "nodeCredentialType": "whatsAppApi",
+        "url": "=https://gate.whapi.cloud/{{ $json.body.path }}",
+        "authentication": "genericCredentialType",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify($json.body) }}",
-        "options": {}
+        "jsonBody": "={{ JSON.stringify($json.body.body) }}",
+        "options": {},
+        "genericAuthType": "httpHeaderAuth"
       },
       "credentials": {
-        "whatsAppApi": {
-          "id": "__CRED:WhatsApp Lia__",
-          "name": "WhatsApp Lia"
+        "httpHeaderAuth": {
+          "id": "__CRED:Whapi Lia__",
+          "name": "Whapi Lia"
         }
       },
       "onError": "continueErrorOutput"

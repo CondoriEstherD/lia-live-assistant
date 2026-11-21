@@ -152,19 +152,51 @@ function buildNotificationMessage(notification, config = DEFAULT_CONFIG) {
     case 'payment_confirmed':
       return text(
         to,
-        `Lia: ¡pago confirmado! La ${garmentLabel(g)} es tuya.\n` +
-          `A nombre de: ${buyerLine(p)}\n` +
-          `Monto: ${formatAmount(p.amount, config)}\n` +
-          (p.paid_at ? `Fecha de pago: ${formatDateTime(p.paid_at, config)}\n` : '') +
-          'La tienda te contactará para la entrega.',
+        [
+          `Lia: ¡pago confirmado! La ${garmentLabel(g)} es tuya.`,
+          `Teléfono: ${buyerLine({ customer_phone: p.customer_phone })}`,
+          `Monto: ${formatAmount(p.amount, config)}`,
+          p.paid_at ? `Fecha de pago: ${formatDateTime(p.paid_at, config)}` : null,
+          '',
+          'Para registrar la compra a tu nombre, envíame la foto de tu comprobante de pago.',
+        ].filter((line) => line !== null).join('\n'),
       );
     case 'garment_sold':
       return text(
         to,
-        `Lia: ¡vendiste la ${garmentLabel(g)}!\n` +
-          `Compradora: ${buyerLine(p)}\n` +
-          `Monto: ${formatAmount(p.amount, config)}\n` +
-          (p.paid_at ? `Fecha de pago: ${formatDateTime(p.paid_at, config)}` : ''),
+        [
+          `Lia: ¡vendiste la ${garmentLabel(g)}!`,
+          `Teléfono: ${buyerLine({ customer_phone: p.customer_phone })}`,
+          'Nombre: pendiente del comprobante',
+          `Monto: ${formatAmount(p.amount, config)}`,
+          p.paid_at ? `Fecha de pago: ${formatDateTime(p.paid_at, config)}` : null,
+        ].filter((line) => line !== null).join('\n'),
+      );
+    case 'voucher_registered':
+      return text(
+        to,
+        [
+          `Lia: listo, la ${garmentLabel(g)} quedó registrada a nombre de ${p.customer_name}.`,
+          `Teléfono: ${buyerLine({ customer_phone: p.customer_phone })}`,
+          p.paid_at ? `Fecha de pago: ${formatDateTime(p.paid_at, config)}` : null,
+          'La tienda te contactará para la entrega.',
+        ].filter((line) => line !== null).join('\n'),
+      );
+    case 'buyer_identified':
+      return text(
+        to,
+        [
+          `Lia: comprobante recibido de la ${garmentLabel(g)}.`,
+          `Compradora: ${buyerLine(p)}`,
+          `Monto: ${formatAmount(p.amount, config)}`,
+          p.paid_at ? `Fecha de pago: ${formatDateTime(p.paid_at, config)}` : null,
+        ].filter((line) => line !== null).join('\n'),
+      );
+    case 'voucher_review':
+      return text(
+        to,
+        `Lia: revisa un comprobante de la ${g.code}: dice ${formatAmount(p.voucher_amount, config)} y la venta es de ` +
+          `${formatAmount(p.expected, config)} (${buyerLine({ customer_name: p.payer_name, customer_phone: p.customer_phone })}).`,
       );
     case 'late_payment':
       return text(to, `Lia: llegó un pago tardío de ${formatAmount(p.amount, config)} por la ${g.code}. Revísalo en la app.`);
@@ -181,8 +213,77 @@ function buildNotificationMessage(notification, config = DEFAULT_CONFIG) {
   }
 }
 
+/**
+ * Converts a Cloud API style message (built above) into a Whapi.Cloud request:
+ * { path, body } for POST https://gate.whapi.cloud/<path>. Returns null for null.
+ */
+function toWhapi(message) {
+  if (!message) return null;
+  const to = message.to;
+  if (message.type === 'text') {
+    return { path: 'messages/text', body: { to, body: message.text.body } };
+  }
+  if (message.type === 'image') {
+    const body = { to, media: message.image.link };
+    if (message.image.caption) body.caption = message.image.caption;
+    return { path: 'messages/image', body };
+  }
+  if (message.type === 'interactive') {
+    const i = message.interactive;
+    const body = {
+      to,
+      type: 'button',
+      body: { text: i.body.text },
+      action: {
+        buttons: i.action.buttons.map((b) => ({ type: 'quick_reply', title: b.reply.title, id: b.reply.id })),
+      },
+    };
+    if (i.header?.image?.link) body.media = i.header.image.link;
+    return { path: 'messages/interactive', body };
+  }
+  throw new Error(`Unsupported message type: ${message.type}`);
+}
+
+/** Reply to lia_register_voucher. 'registered' returns null: confirmations go through the outbox. */
+function buildVoucherReply(to, result, config = DEFAULT_CONFIG) {
+  switch (result.status) {
+    case 'name_missing':
+      return text(to, 'Lia: no pude leer el nombre en tu comprobante. Envíame una foto más clara del comprobante completo.');
+    case 'amount_mismatch':
+      return text(to, `Lia: tu comprobante dice ${formatAmount(result.voucher_amount, config)} y tu compra es de ${formatAmount(result.expected, config)}. La tienda lo va a revisar.`);
+    case 'no_sale':
+      return text(to, 'Lia: no encuentro un pago confirmado a tu número. Primero paga con el QR que te envié y después manda el comprobante.');
+    case 'already_registered':
+      return text(to, 'Lia: tu compra ya está registrada con tu comprobante. ¡Gracias!');
+    default: // registered, unknown_seller
+      return null;
+  }
+}
+
+/** Parses the AI reading of a voucher photo. Unknown or unreadable fields come back as null. */
+function parseVoucherExtraction(raw) {
+  const empty = { payer_name: null, amount: null, paid_at: null, reference: null };
+  const match = String(raw ?? '').match(/\{[\s\S]*\}/);
+  if (!match) return empty;
+  let data;
+  try { data = JSON.parse(match[0]); } catch { return empty; }
+  const name = typeof data.payer_name === 'string' ? data.payer_name.replace(/\s+/g, ' ').trim() : '';
+  // "1.500,00" -> 1500.00 ; "150,00" -> 150.00 ; "150.00" -> 150.00
+  const digits = String(data.amount ?? '').replace(/[^0-9,.]/g, '');
+  const normalized = /,\d{1,2}$/.test(digits) ? digits.replace(/\./g, '').replace(',', '.') : digits.replace(/,/g, '');
+  const amount = Number(normalized);
+  const date = data.paid_at ? new Date(data.paid_at) : null;
+  return {
+    payer_name: name || null,
+    amount: digits && Number.isFinite(amount) && amount > 0 ? amount : null,
+    paid_at: date && !Number.isNaN(date.getTime()) ? date.toISOString() : null,
+    reference: typeof data.reference === 'string' && data.reference.trim() ? data.reference.trim() : null,
+  };
+}
+
 module.exports = {
   DEFAULT_CONFIG,
+  toWhapi,
   formatAmount,
   formatTime,
   formatDateTime,
@@ -192,4 +293,6 @@ module.exports = {
   buildRequestReply,
   buildConfirmReply,
   buildNotificationMessage,
+  buildVoucherReply,
+  parseVoucherExtraction,
 };

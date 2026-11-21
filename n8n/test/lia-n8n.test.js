@@ -39,7 +39,7 @@ test('parses buyer messages and ignores status callbacks', () => {
   assert.equal(messages.length, 2);
   assert.deepEqual(messages[0], {
     phoneNumberId: 'PN1', from: '59170000001', name: 'Ana', waMessageId: 'wamid.1',
-    messageTs: '2025-11-21T16:00:00.000Z', type: 'text', text: 'A12', buttonId: null,
+    messageTs: '2025-11-21T16:00:00.000Z', type: 'text', text: 'A12', buttonId: null, mediaId: null,
   });
   assert.equal(messages[1].buttonId, 'lia_confirm');
 });
@@ -61,7 +61,7 @@ test('classifies confirmations and rejections from text or buttons', () => {
 test('sends free text to the agent and ignores unsupported media', () => {
   assert.equal(classifyMessage({ type: 'text', text: '¿Hacen envíos a Montero?' }).route, 'free_text');
   assert.equal(classifyMessage({ type: 'text', text: 'quiero la A12 en talla M' }).route, 'free_text');
-  assert.equal(classifyMessage({ type: 'image', text: null }).route, 'unsupported');
+  assert.equal(classifyMessage({ type: 'audio', text: null }).route, 'unsupported');
 });
 
 test('formats amounts in bolivianos and times in Bolivia', () => {
@@ -152,26 +152,117 @@ test('garment preview tells the buyer she has 1 minute to confirm', () => {
   assert.match(msg.interactive.body.text, /Confirma antes de las 20:36 \(1 minuto\)/);
 });
 
-test('payment confirmation shows the buyer name and phone', () => {
-  const msg = buildNotificationMessage({
-    kind: 'payment_confirmed', to_phone: '59171111111', customer_phone: '59171111111',
-    payload: { amount: 150, paid_at: '2026-11-22T00:35:00Z', customer_name: 'Ana Pérez', customer_phone: '59171111111', garment },
-  });
+const { buildVoucherReply, parseVoucherExtraction } = require('../code/lia-messages');
+
+const buyer = { customer_phone: '59171111111', paid_at: '2026-11-22T00:35:00Z', amount: 150, garment };
+
+test('payment confirmation shows phone and date and asks for the voucher photo', () => {
+  const msg = buildNotificationMessage({ kind: 'payment_confirmed', to_phone: '59171111111', payload: buyer });
   assert.equal(msg.to, '59171111111');
-  assert.match(msg.text.body, /Ana Pérez/);
   assert.match(msg.text.body, /\+59171111111/);
   assert.match(msg.text.body, /Fecha de pago: 21.11.2026 20:35/);
+  assert.match(msg.text.body, /foto de tu comprobante/);
 });
 
-test('the seller gets who bought: name, phone, garment and amount', () => {
-  const msg = buildNotificationMessage({
-    kind: 'garment_sold', audience: 'seller', to_phone: '59170000000',
-    payload: { amount: 150, paid_at: '2026-11-22T00:35:00Z', customer_name: 'Ana Pérez', customer_phone: '59171111111', garment },
-  });
+test('the seller is told about the sale while the buyer name is pending', () => {
+  const msg = buildNotificationMessage({ kind: 'garment_sold', audience: 'seller', to_phone: '59170000000', payload: buyer });
   assert.equal(msg.to, '59170000000');
   assert.match(msg.text.body, /A12/);
-  assert.match(msg.text.body, /Ana Pérez/);
   assert.match(msg.text.body, /\+59171111111/);
   assert.match(msg.text.body, /Bs 150,00/);
   assert.match(msg.text.body, /Fecha de pago: 21.11.2026 20:35/);
+  assert.match(msg.text.body, /pendiente del comprobante/);
+});
+
+test('after the voucher, buyer and seller get the name from the voucher', () => {
+  const payload = { ...buyer, customer_name: 'Ana María Pérez Rojas' };
+  const toBuyer = buildNotificationMessage({ kind: 'voucher_registered', to_phone: '59171111111', payload });
+  assert.match(toBuyer.text.body, /a nombre de Ana María Pérez Rojas/);
+  assert.match(toBuyer.text.body, /\+59171111111/);
+  assert.match(toBuyer.text.body, /Fecha de pago: 21.11.2026 20:35/);
+
+  const toSeller = buildNotificationMessage({ kind: 'buyer_identified', to_phone: '59170000000', payload });
+  assert.equal(toSeller.to, '59170000000');
+  assert.match(toSeller.text.body, /Ana María Pérez Rojas/);
+  assert.match(toSeller.text.body, /\+59171111111/);
+  assert.match(toSeller.text.body, /A12/);
+  assert.match(toSeller.text.body, /Fecha de pago: 21.11.2026 20:35/);
+});
+
+test('the seller is asked to review a voucher with another amount', () => {
+  const msg = buildNotificationMessage({
+    kind: 'voucher_review', to_phone: '59170000000',
+    payload: { expected: 150, voucher_amount: 90, payer_name: 'Ana', customer_phone: '59171111111', garment },
+  });
+  assert.match(msg.text.body, /Bs 90,00/);
+  assert.match(msg.text.body, /Bs 150,00/);
+});
+
+test('a photo from the buyer is treated as a payment voucher', () => {
+  const [m] = parseWhatsAppWebhook({ entry: [{ changes: [{ value: {
+    metadata: { phone_number_id: 'PN1' },
+    messages: [{ from: '591', id: 'wamid.img', timestamp: '1763740800', type: 'image', image: { id: 'MEDIA1', mime_type: 'image/jpeg' } }],
+  } }] }] });
+  assert.equal(m.mediaId, 'MEDIA1');
+  assert.deepEqual(classifyMessage(m), { route: 'voucher' });
+});
+
+test('voucher replies to the buyer', () => {
+  assert.equal(buildVoucherReply('1', { status: 'registered' }), null); // sent through the outbox
+  assert.match(buildVoucherReply('1', { status: 'name_missing' }).text.body, /no pude leer el nombre/);
+  assert.match(buildVoucherReply('1', { status: 'amount_mismatch', expected: 150, voucher_amount: 90 }).text.body, /Bs 90,00/);
+  assert.match(buildVoucherReply('1', { status: 'no_sale' }).text.body, /no encuentro un pago/);
+  assert.match(buildVoucherReply('1', { status: 'already_registered' }).text.body, /ya está registrada/);
+});
+
+test('the AI voucher reading is parsed safely', () => {
+  assert.deepEqual(
+    parseVoucherExtraction('```json\n{"payer_name":" Ana  María ","amount":"150,00","paid_at":"2026-11-21T20:35:00-04:00","reference":"TRX1"}\n```'),
+    { payer_name: 'Ana María', amount: 150, paid_at: '2026-11-22T00:35:00.000Z', reference: 'TRX1' },
+  );
+  assert.deepEqual(parseVoucherExtraction('no es un comprobante'), { payer_name: null, amount: null, paid_at: null, reference: null });
+});
+
+test('parses Whapi webhooks: text, button replies; ignores own and group messages', () => {
+  const body = {
+    channel_id: 'HULKBR-4WGWP',
+    event: { type: 'messages', event: 'post' },
+    messages: [
+      { id: 'w1', from_me: false, type: 'text', chat_id: '59170000001@s.whatsapp.net', timestamp: 1763740800,
+        text: { body: 'A12' }, from: '59170000001', from_name: 'Ana' },
+      { id: 'w2', from_me: false, type: 'reply', chat_id: '59170000001@s.whatsapp.net', timestamp: 1763740810,
+        reply: { type: 'buttons_reply', buttons_reply: { id: 'ButtonsV3:lia_confirm', title: 'Sí, es esta' } },
+        from: '59170000001', from_name: 'Ana' },
+      { id: 'w3', from_me: true, type: 'text', chat_id: '59170000001@s.whatsapp.net', timestamp: 1763740811, text: { body: 'x' } },
+      { id: 'w4', from_me: false, type: 'text', chat_id: '123@g.us', timestamp: 1763740812, text: { body: 'A12' }, from: '5917' },
+    ],
+  };
+
+  const messages = parseWhatsAppWebhook(body);
+
+  assert.equal(messages.length, 2);
+  assert.deepEqual(messages[0], {
+    phoneNumberId: 'HULKBR-4WGWP', from: '59170000001', name: 'Ana', waMessageId: 'w1',
+    messageTs: '2025-11-21T16:00:00.000Z', type: 'text', text: 'A12', buttonId: null, mediaId: null,
+  });
+  assert.equal(messages[1].buttonId, 'lia_confirm');
+  assert.deepEqual(classifyMessage(messages[1]), { route: 'confirm' });
+  assert.deepEqual(classifyMessage(messages[0]), { route: 'code', code: 'A12' });
+});
+
+test('toWhapi converts text, image and button messages to Whapi requests', () => {
+  const { toWhapi } = require('../code/lia-messages');
+  assert.equal(toWhapi(null), null);
+  assert.deepEqual(toWhapi({ messaging_product: 'whatsapp', to: '591', type: 'text', text: { body: 'hola' } }),
+    { path: 'messages/text', body: { to: '591', body: 'hola' } });
+  assert.deepEqual(toWhapi({ messaging_product: 'whatsapp', to: '591', type: 'image', image: { link: 'https://q', caption: 'c' } }),
+    { path: 'messages/image', body: { to: '591', media: 'https://q', caption: 'c' } });
+
+  const preview = toWhapi(buildRequestReply('591', { status: 'pending_confirmation', garment }));
+  assert.equal(preview.path, 'messages/interactive');
+  assert.equal(preview.body.media, 'https://cdn/a12.jpg');
+  assert.deepEqual(preview.body.action.buttons, [
+    { type: 'quick_reply', title: 'Sí, es esta', id: 'lia_confirm' },
+    { type: 'quick_reply', title: 'No es esta', id: 'lia_reject' },
+  ]);
 });

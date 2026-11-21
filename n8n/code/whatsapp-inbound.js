@@ -1,10 +1,13 @@
-// Parsing and routing of WhatsApp Cloud API webhooks for Lia.
+// Parsing and routing of WhatsApp webhooks (Whapi.Cloud or Cloud API) for Lia.
 // Used inside n8n Code nodes (copy the functions) and tested with `npm test`.
 
 const CONFIRM_WORDS = new Set([
   'si', 'sii', 'siii', 'si es', 'si esa', 'es esa', 'esa', 'esa es', 'ok', 'okey', 'dale', 'la quiero', 'confirmo',
+  'si es esta', 'es esta', 'si esta', 'esta', 'esta es',
 ]);
-const REJECT_WORDS = new Set(['no', 'no es', 'no es esa', 'otra', 'cancelar', 'cancela']);
+const REJECT_WORDS = new Set([
+  'no', 'no es', 'no es esa', 'otra', 'cancelar', 'cancela', 'no es esta', 'no no es esta', 'no no es esa',
+]);
 
 // Garment codes: letters + digits, optional dash, at least one digit (A12, B-07, 123, ZP45B).
 const CODE_PATTERN = /^[a-z]{0,4}-?\d{1,4}[a-z]?$/i;
@@ -24,6 +27,7 @@ function normalizeText(text) {
  * Delivery/read status callbacks are ignored.
  */
 function parseWhatsAppWebhook(body) {
+  if (Array.isArray(body?.messages)) return parseWhapiWebhook(body);
   const result = [];
   for (const entry of body?.entry ?? []) {
     for (const change of entry?.changes ?? []) {
@@ -49,9 +53,40 @@ function parseWhatsAppWebhook(body) {
           type: msg.type,
           text,
           buttonId,
+          mediaId: msg.image?.id ?? null,
         });
       }
     }
+  }
+  return result;
+}
+
+/**
+ * Flattens a Whapi.Cloud webhook body ({ messages, channel_id }) into buyer messages.
+ * Own messages (from_me), groups and non-message events are ignored.
+ * phoneNumberId is the Whapi channel_id (stored in sellers.wa_phone_number_id).
+ */
+function parseWhapiWebhook(body) {
+  const result = [];
+  for (const msg of body.messages) {
+    if (!msg || msg.from_me) continue;
+    if (msg.chat_id && !String(msg.chat_id).endsWith('@s.whatsapp.net')) continue;
+    const reply = msg.reply?.buttons_reply ?? msg.reply?.list_reply ?? null;
+    // Whapi prefixes button ids ("ButtonsV3:lia_confirm").
+    const buttonId = reply?.id ? String(reply.id).replace(/^[^:]*:/, '') : null;
+    const text = msg.text?.body ?? reply?.title ?? msg.link_preview?.body ?? null;
+    result.push({
+      phoneNumberId: body.channel_id ?? null,
+      from: String(msg.from ?? String(msg.chat_id ?? '').split('@')[0]),
+      name: msg.from_name ?? null,
+      waMessageId: msg.id,
+      messageTs: new Date(Number(msg.timestamp) * 1000).toISOString(),
+      type: reply ? 'interactive' : msg.type === 'link_preview' ? 'text' : msg.type,
+      text,
+      buttonId,
+      // Whapi media: download with GET https://gate.whapi.cloud/media/<id> (Bearer token).
+      mediaId: msg.image?.id ?? null,
+    });
   }
   return result;
 }
@@ -63,6 +98,7 @@ function parseWhatsAppWebhook(body) {
 function classifyMessage({ type, text, buttonId }) {
   if (buttonId === 'lia_confirm') return { route: 'confirm' };
   if (buttonId === 'lia_reject') return { route: 'reject' };
+  if (type === 'image') return { route: 'voucher' }; // photo of the payment voucher (comprobante)
 
   if (!text) return { route: 'unsupported' };
 
@@ -78,4 +114,4 @@ function classifyMessage({ type, text, buttonId }) {
   return { route: type === 'text' || type === 'interactive' || type === 'button' ? 'free_text' : 'unsupported' };
 }
 
-module.exports = { parseWhatsAppWebhook, classifyMessage, normalizeText };
+module.exports = { parseWhatsAppWebhook, parseWhapiWebhook, classifyMessage, normalizeText };
