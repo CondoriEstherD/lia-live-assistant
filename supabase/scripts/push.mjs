@@ -53,7 +53,8 @@ for (const file of files) {
   if (!/^\d+_[a-z0-9_]+\.sql$/.test(file)) fail(`Unexpected migration file name: ${file}`);
 }
 const migrations = files.map((file) => {
-  const sql = readFileSync(path.join(migrationsDir, file), 'utf8');
+  // Normalize line endings so a CRLF checkout on Windows keeps the same checksum.
+  const sql = readFileSync(path.join(migrationsDir, file), 'utf8').replace(/\r\n/g, '\n');
   return { file, sql, checksum: createHash('sha256').update(sql).digest('hex') };
 });
 
