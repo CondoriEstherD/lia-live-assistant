@@ -312,3 +312,40 @@ test('end live releases waiting buyers but keeps the buyer who already holds a Q
   assert.deepEqual(statuses, ['active', 'cancelled']);
   assert.equal((await notifications(db, 'live_ended')).length, 1);
 });
+
+test('security: the app edits garment details but stock and status only through set_garment_stock', async () => {
+  const { db, sellerId } = await freshDb();
+  const g = await addGarment(db, sellerId, 'A1', { stock: 2 });
+  await request(db, 'ana', 'A1', at(0));
+  await confirm(db, 'ana', at(1));
+  await request(db, 'bea', 'A1', at(2));
+  await confirm(db, 'bea', at(3));
+  await request(db, 'cami', 'A1', at(4));
+  await confirm(db, 'cami', at(5));
+
+  await asSeller(db, 'user_1', async () => {
+    await db.query(`update garments set name = 'Vestido azul', price = 160 where id = $1`, [g.id]);
+    await assert.rejects(db.query(`update garments set stock = 1 where id = $1`, [g.id]), /permission denied/);
+    await assert.rejects(db.query(`update garments set status = 'sold' where id = $1`, [g.id]), /permission denied/);
+    await assert.rejects(db.query(`delete from garments where id = $1`, [g.id]), /permission denied/);
+    const low = await rpc(db, 'set_garment_stock', { p_garment_id: g.id, p_stock: 1 });
+    assert.deepEqual(low, { status: 'below_reserved', reserved: 2 });
+    const up = await rpc(db, 'set_garment_stock', { p_garment_id: g.id, p_stock: 3 });
+    assert.equal(up.status, 'updated');
+  });
+  // The extra unit goes to cami, who was waiting.
+  assert.equal((await notifications(db, 'reservation_qr')).length, 3);
+});
+
+test('security: a Clerk user cannot claim a WhatsApp number or another account', async () => {
+  const { db } = await freshDb();
+  await asSeller(db, 'attacker', async () => {
+    await assert.rejects(db.query(
+      `insert into sellers (clerk_user_id, whatsapp_number, wa_phone_number_id) values ('attacker', '+591', 'PN_X')`),
+      /permission denied/);
+    await db.query(`insert into sellers (clerk_user_id, whatsapp_number) values ('attacker', '+591')`);
+    await assert.rejects(db.query(`update sellers set wa_phone_number_id = 'PN_X'`), /permission denied/);
+    await assert.rejects(db.query(`insert into sellers (clerk_user_id, whatsapp_number) values ('user_1', '+591')`),
+      /row-level security/);
+  });
+});

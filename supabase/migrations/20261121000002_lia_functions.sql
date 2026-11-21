@@ -685,3 +685,60 @@ begin
   perform lia_promote_queue(v_garment.id, p_now);
   return jsonb_build_object('status', 'voided', 'stock', v_garment.stock);
 end $$;
+
+-- Stock changes from the app. Never below the units held by active reservations (R2);
+-- extra units go to the queue right away.
+create or replace function set_garment_stock(p_garment_id uuid, p_stock int, p_now timestamptz default now())
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare
+  v_seller_id uuid := lia_require_seller();
+  v_garment garments;
+  v_reserved int;
+begin
+  if p_stock is null or p_stock < 0 then
+    return jsonb_build_object('status', 'invalid_stock');
+  end if;
+  select * into v_garment from garments where id = p_garment_id and seller_id = v_seller_id for update;
+  if v_garment.id is null or v_garment.status = 'archived' then
+    return jsonb_build_object('status', 'not_found');
+  end if;
+  select count(*) into v_reserved from reservations where garment_id = v_garment.id and status = 'active';
+  if p_stock < v_reserved then
+    return jsonb_build_object('status', 'below_reserved', 'reserved', v_reserved);
+  end if;
+
+  update garments
+  set stock = p_stock,
+      status = case when p_stock = 0 then 'sold'::garment_status else 'in_catalog'::garment_status end,
+      updated_at = p_now
+  where id = v_garment.id
+  returning * into v_garment;
+  perform lia_log_event(v_seller_id, 'garment', v_garment.id, 'stock_set', jsonb_build_object('stock', p_stock));
+
+  if p_stock = 0 then
+    perform lia_close_waiting(v_garment.id, p_now);
+  else
+    perform lia_promote_queue(v_garment.id, p_now);
+  end if;
+  return jsonb_build_object('status', 'updated', 'stock', v_garment.stock, 'garment_status', v_garment.status);
+end $$;
+
+-- Archive (hide) a garment; history is kept. Not allowed while a buyer holds a QR for it.
+create or replace function archive_garment(p_garment_id uuid, p_now timestamptz default now())
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare
+  v_seller_id uuid := lia_require_seller();
+  v_garment garments;
+begin
+  select * into v_garment from garments where id = p_garment_id and seller_id = v_seller_id for update;
+  if v_garment.id is null or v_garment.status = 'archived' then
+    return jsonb_build_object('status', 'not_found');
+  end if;
+  if exists (select 1 from reservations where garment_id = v_garment.id and status = 'active') then
+    return jsonb_build_object('status', 'has_active_reservation');
+  end if;
+  perform lia_close_waiting(v_garment.id, p_now);
+  update garments set status = 'archived', updated_at = p_now where id = v_garment.id;
+  perform lia_log_event(v_seller_id, 'garment', v_garment.id, 'archived');
+  return jsonb_build_object('status', 'archived');
+end $$;

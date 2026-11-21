@@ -49,20 +49,44 @@ create policy notifications_select_own on notifications for select to authentica
   using (seller_id = lia_current_seller_id() and audience = 'seller');
 -- payment_qrs and messages: no app policy (service role only).
 
--- Column-level guard: the app may only mark seller notifications as read.
-revoke update on notifications from authenticated;
-grant update (read_at) on notifications to authenticated;
 create policy notifications_mark_read_own on notifications for update to authenticated
   using (seller_id = lia_current_seller_id() and audience = 'seller')
   with check (seller_id = lia_current_seller_id() and audience = 'seller');
 
--- The app must not move stock or statuses with raw writes on these tables.
-revoke insert, update, delete on live_sessions, customers, reservations, payment_qrs, payments, sales, messages, events
-  from anon, authenticated;
-revoke all on all tables in schema public from anon;
+-- Table privileges, scoped to Lia tables only (other objects in "public" are left untouched).
+-- Supabase grants ALL to anon/authenticated by default; start from nothing and grant per column.
+revoke all on sellers, garments, live_sessions, customers, reservations, payment_qrs, payments, sales, messages,
+  notifications, events from anon, authenticated;
+grant select on sellers, garments, live_sessions, customers, reservations, payments, sales, notifications, events
+  to authenticated;
 
--- Functions: Supabase grants EXECUTE to anon/authenticated by default; lock everything down first.
-revoke execute on all functions in schema public from public, anon, authenticated;
+-- Sellers: wa_phone_number_id and the limits are set by the team (service role), never by the app.
+grant insert (clerk_user_id, whatsapp_number, name, username, social_links, reservation_minutes) on sellers
+  to authenticated;
+grant update (whatsapp_number, name, username, social_links, reservation_minutes) on sellers to authenticated;
+
+-- Garments: details are editable; stock and status change only through set_garment_stock,
+-- record_manual_sale, void_sale and archive_garment (they lock the row and respect reservations).
+grant insert (seller_id, code, name, description, size, color, price, stock, photo_url) on garments to authenticated;
+grant update (code, name, description, size, color, price, photo_url) on garments to authenticated;
+
+-- Seller notifications: the app may only mark them as read.
+grant update (read_at) on notifications to authenticated;
+
+-- Functions: lock down every Lia function first (Supabase grants EXECUTE to anon/authenticated by default).
+do $$
+declare
+  f regprocedure;
+begin
+  for f in
+    select p.oid::regprocedure from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = $q$public$q$
+      and (starts_with(p.proname, $q$lia_$q$) or p.proname in ($q$start_live$q$, $q$end_live$q$, $q$record_manual_sale$q$,
+                                                    $q$void_sale$q$, $q$set_garment_stock$q$, $q$archive_garment$q$))
+  loop
+    execute format($q$revoke execute on function %s from public, anon, authenticated$q$, f);
+  end loop;
+end $$;
 
 -- n8n (service role) only: buyer flow, cron, outbox, payments.
 grant execute on function
@@ -84,7 +108,9 @@ grant execute on function
   start_live(timestamptz),
   end_live(timestamptz),
   record_manual_sale(uuid, int, timestamptz),
-  void_sale(uuid, timestamptz)
+  void_sale(uuid, timestamptz),
+  set_garment_stock(uuid, int, timestamptz),
+  archive_garment(uuid, timestamptz)
   to authenticated, service_role;
 
 -- Live board in the app (Supabase Realtime), only where the publication exists.
