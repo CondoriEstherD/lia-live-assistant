@@ -69,19 +69,21 @@ test('formats amounts in bolivianos and times in Bolivia', () => {
   assert.equal(formatTime('2026-11-22T00:35:00Z'), '20:35');
 });
 
-test('garment preview shows the photo with confirm/reject buttons', () => {
+test('garment preview is a plain photo with caption (buttons are not shown on every phone)', () => {
   const msg = buildRequestReply('591700', { status: 'pending_confirmation', garment });
 
-  assert.equal(msg.type, 'interactive');
-  assert.deepEqual(msg.interactive.header, { type: 'image', image: { link: 'https://cdn/a12.jpg' } });
-  assert.match(msg.interactive.body.text, /A12 · Vestido rojo · talla M/);
-  assert.match(msg.interactive.body.text, /Bs 150,00/);
-  assert.deepEqual(msg.interactive.action.buttons.map((b) => b.reply.id), ['lia_confirm', 'lia_reject']);
+  assert.equal(msg.type, 'image');
+  assert.equal(msg.image.link, 'https://cdn/a12.jpg');
+  assert.match(msg.image.caption, /A12 · Vestido rojo · talla M/);
+  assert.match(msg.image.caption, /Bs 150,00/);
+  assert.match(msg.image.caption, /Responde SI/);
+  assert.match(msg.image.caption, /NO/);
 });
 
-test('garment preview without photo has no header', () => {
+test('garment preview without photo is plain text', () => {
   const msg = buildRequestReply('591700', { status: 'pending_confirmation', garment: { ...garment, photo_url: null } });
-  assert.equal(msg.interactive.header, undefined);
+  assert.equal(msg.type, 'text');
+  assert.match(msg.text.body, /Responde SI/);
 });
 
 test('request replies for missing, sold and duplicate cases', () => {
@@ -149,7 +151,7 @@ test('garment preview tells the buyer she has 1 minute to confirm', () => {
   const msg = buildRequestReply('591700', {
     status: 'pending_confirmation', confirm_deadline: '2026-11-22T00:36:00Z', garment,
   });
-  assert.match(msg.interactive.body.text, /Confirma antes de las 20:36 \(1 minuto\)/);
+  assert.match(msg.image.caption, /Confirma antes de las 20:36 \(1 minuto\)/);
 });
 
 const { buildVoucherReply, parseVoucherExtraction } = require('../code/lia-messages');
@@ -259,10 +261,20 @@ test('toWhapi converts text, image and button messages to Whapi requests', () =>
     { path: 'messages/image', body: { to: '591', media: 'https://q', caption: 'c' } });
 
   const preview = toWhapi(buildRequestReply('591', { status: 'pending_confirmation', garment }));
-  assert.equal(preview.path, 'messages/interactive');
+  assert.equal(preview.path, 'messages/image');
   assert.equal(preview.body.media, 'https://cdn/a12.jpg');
-  assert.deepEqual(preview.body.action.buttons, [
-    { type: 'quick_reply', title: 'Sí, es esta', id: 'lia_confirm' },
-    { type: 'quick_reply', title: 'No es esta', id: 'lia_reject' },
-  ]);
+  assert.match(preview.body.caption, /Responde SI/);
+});
+
+test('QR image URL works in the n8n Code sandbox, which has no URLSearchParams', () => {
+  const original = globalThis.URLSearchParams;
+  delete globalThis.URLSearchParams;
+  try {
+    const url = qrImageUrl('tok123');
+    assert.ok(url.startsWith('https://quickchart.io/qr?text='));
+    assert.ok(decodeURIComponent(url).includes('lia-pay?token=tok123'));
+    assert.match(url, /size=600/);
+  } finally {
+    globalThis.URLSearchParams = original;
+  }
 });

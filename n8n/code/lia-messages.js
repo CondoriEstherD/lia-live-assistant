@@ -63,33 +63,31 @@ function payUrl(token, config = DEFAULT_CONFIG) {
 }
 
 function qrImageUrl(token, config = DEFAULT_CONFIG) {
-  const params = new URLSearchParams({ text: payUrl(token, config), size: '600', margin: '2' });
-  return `${config.qrImageBaseUrl}?${params.toString()}`;
+  const params = [['text', payUrl(token, config)], ['size', '600'], ['margin', '2']]
+    .map(([key, value]) => `${key}=${encodeURIComponent(value)}`)
+    .join('&');
+  return `${config.qrImageBaseUrl}?${params}`;
 }
 
-/** Photo of the garment + "is this the one?" buttons (result of lia_request_garment). */
+/**
+ * Photo of the garment + "is this the one?" question (result of lia_request_garment).
+ * Plain photo with caption, no buttons: WhatsApp does not display button messages on every
+ * phone when they come from a non-Business account. The buyer answers SI / NO as text.
+ */
 function buildPreviewMessage(to, garment, config = DEFAULT_CONFIG, confirmDeadline = null) {
-  const body =
-    `Lia: ¿Es esta prenda?\n\n${garmentLabel(garment)}\nPrecio: ${formatAmount(garment.price, config)}` +
-    (garment.description ? `\n${garment.description}` : '') +
-    (confirmDeadline
-      ? `\n\nConfirma antes de las ${formatTime(confirmDeadline, config)} (1 minuto). Te envío el QR de pago apenas confirmes.`
-      : '');
-
-  const interactive = {
-    type: 'button',
-    body: { text: body },
-    action: {
-      buttons: [
-        { type: 'reply', reply: { id: 'lia_confirm', title: 'Sí, es esta' } },
-        { type: 'reply', reply: { id: 'lia_reject', title: 'No es esta' } },
-      ],
-    },
-  };
-  if (garment.photo_url) {
-    interactive.header = { type: 'image', image: { link: garment.photo_url } };
+  const lines = [
+    'Lia: ¿Es esta prenda?',
+    '',
+    garmentLabel(garment),
+    `Precio: ${formatAmount(garment.price, config)}`,
+  ];
+  if (garment.description) lines.push(garment.description);
+  lines.push('', 'Responde SI si es esta, o NO si no es.');
+  if (confirmDeadline) {
+    lines.push(`Confirma antes de las ${formatTime(confirmDeadline, config)} (1 minuto). Te envío el QR de pago apenas confirmes.`);
   }
-  return { messaging_product: 'whatsapp', to, type: 'interactive', interactive };
+  const body = lines.join('\n');
+  return garment.photo_url ? image(to, garment.photo_url, body) : text(to, body);
 }
 
 /** Reply to lia_request_garment. */
