@@ -47,9 +47,9 @@ pedir prendas a nombre de otra persona.
 
 ## Modelo
 
-- Nodo **Anthropic Chat Model** de n8n con el modelo `claude-opus-5-5` (valor por defecto del proyecto).
-- Si el costo por mensaje preocupa durante un live con mucho tráfico, el equipo puede decidir
-  cambiar a `claude-haiku-5-5`; es una decisión de costo, conviene medirla con conversaciones reales.
-- Verificar en la versión de n8n que el nodo permita escribir el ID del modelo; si el desplegable no lo
-  muestra, usar el campo de modelo personalizado (por ID).
+- Nodo **OpenAI Chat Model** (`lmChatOpenAi` v1.3) con el modelo `gpt-6-luna` (elegido por el equipo), credencial `OpenAI Lia`.
+- `gpt-6-luna` exige la **Responses API** para usar herramientas (`responsesApiEnabled: true`) y el nodo **AI Agent v3.1**;
+  con Chat Completions devuelve "Function tools with reasoning_effort are not supported".
+- No acepta `temperature` distinto de 1.
 - Memoria: **Simple Memory** (ventana de 6 mensajes) con la clave de sesión = teléfono de la compradora.
+- Probado el 2026-11-21 en marilyncd12: el agente llamó a `buscar_prendas` y respondió con datos del catálogo.

@@ -488,7 +488,7 @@
       ],
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "//@include lia-messages.js\n\nconst msg = $('Parse message').item.json;\nreturn { json: { phoneNumberId: msg.phoneNumberId, message: buildConfirmReply(msg.from, $json) } };"
+        "jsCode": "//@include lia-messages.js\n\nconst msg = $('Parse message').first().json;\nreturn { json: { phoneNumberId: msg.phoneNumberId, message: buildConfirmReply(msg.from, $json) } };"
       }
     },
     {
@@ -618,7 +618,7 @@
       ],
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "//@include lia-messages.js\n\nconst msg = $('Parse message').item.json;\nconst message = $json.status === 'cancelled'\n  ? text(msg.from, 'Lia: listo, escribe el código de la prenda que quieres.')\n  : null;\nreturn { json: { phoneNumberId: msg.phoneNumberId, message } };"
+        "jsCode": "//@include lia-messages.js\n\nconst msg = $('Parse message').first().json;\nconst message = $json.status === 'cancelled'\n  ? text(msg.from, 'Lia: listo, escribe el código de la prenda que quieres.')\n  : null;\nreturn { json: { phoneNumberId: msg.phoneNumberId, message } };"
       }
     },
     {
@@ -659,7 +659,7 @@
       "id": "92e0c604-2336-4630-a7d5-be2084e463c3",
       "name": "Lia agent",
       "type": "@n8n/n8n-nodes-langchain.agent",
-      "typeVersion": 2.2,
+      "typeVersion": 3.1,
       "position": [
         1360,
         640
@@ -674,8 +674,8 @@
     },
     {
       "id": "b6fc329f-071c-4a1d-a419-503e330b85d1",
-      "name": "Anthropic model",
-      "type": "@n8n/n8n-nodes-langchain.lmChatAnthropic",
+      "name": "OpenAI model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
       "typeVersion": 1.3,
       "position": [
         1180,
@@ -685,14 +685,15 @@
         "model": {
           "__rl": true,
           "mode": "id",
-          "value": "claude-opus-5-5"
+          "value": "gpt-6-luna"
         },
+        "responsesApiEnabled": true,
         "options": {}
       },
       "credentials": {
-        "anthropicApi": {
-          "id": "__CRED:Anthropic Lia__",
-          "name": "Anthropic Lia"
+        "openAiApi": {
+          "id": "__CRED:OpenAI Lia__",
+          "name": "OpenAI Lia"
         }
       }
     },
@@ -707,7 +708,7 @@
       ],
       "parameters": {
         "sessionIdType": "customKey",
-        "sessionKey": "={{ $('Parse message').item.json.from }}",
+        "sessionKey": "={{ $('Parse message').first().json.from }}",
         "contextWindowLength": 6
       }
     },
@@ -730,7 +731,7 @@
         "workflowInputs": {
           "mappingMode": "defineBelow",
           "value": {
-            "phoneNumberId": "={{ $('Parse message').item.json.phoneNumberId }}",
+            "phoneNumberId": "={{ $('Parse message').first().json.phoneNumberId }}",
             "query": "={{ $fromAI('query', 'Texto a buscar en el catálogo, por ejemplo: vestido rojo talla M', 'string') }}"
           },
           "matchingColumns": [],
@@ -780,12 +781,12 @@
         "workflowInputs": {
           "mappingMode": "defineBelow",
           "value": {
-            "phoneNumberId": "={{ $('Parse message').item.json.phoneNumberId }}",
-            "from": "={{ $('Parse message').item.json.from }}",
-            "name": "={{ $('Parse message').item.json.name }}",
+            "phoneNumberId": "={{ $('Parse message').first().json.phoneNumberId }}",
+            "from": "={{ $('Parse message').first().json.from }}",
+            "name": "={{ $('Parse message').first().json.name }}",
             "code": "={{ $fromAI('code', 'Código de la prenda que dijo la compradora, por ejemplo A12', 'string') }}",
-            "waMessageId": "={{ $('Parse message').item.json.waMessageId }}:agent",
-            "messageTs": "={{ $('Parse message').item.json.messageTs }}"
+            "waMessageId": "={{ $('Parse message').first().json.waMessageId }}:agent",
+            "messageTs": "={{ $('Parse message').first().json.messageTs }}"
           },
           "matchingColumns": [],
           "schema": [
@@ -874,8 +875,8 @@
         "workflowInputs": {
           "mappingMode": "defineBelow",
           "value": {
-            "phoneNumberId": "={{ $('Parse message').item.json.phoneNumberId }}",
-            "from": "={{ $('Parse message').item.json.from }}"
+            "phoneNumberId": "={{ $('Parse message').first().json.phoneNumberId }}",
+            "from": "={{ $('Parse message').first().json.from }}"
           },
           "matchingColumns": [],
           "schema": [
@@ -916,7 +917,7 @@
       ],
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "//@include lia-messages.js\n\nconst msg = $('Parse message').item.json;\nreturn { json: { phoneNumberId: msg.phoneNumberId, message: text(msg.from, String($json.output ?? '')) } };"
+        "jsCode": "//@include lia-messages.js\n\nconst msg = $('Parse message').first().json;\nreturn { json: { phoneNumberId: msg.phoneNumberId, message: text(msg.from, String($json.output ?? '')) } };"
       }
     },
     {
@@ -1208,17 +1209,6 @@
         ]
       ]
     },
-    "Anthropic model": {
-      "ai_languageModel": [
-        [
-          {
-            "node": "Lia agent",
-            "type": "ai_languageModel",
-            "index": 0
-          }
-        ]
-      ]
-    },
     "Buyer memory": {
       "ai_memory": [
         [
@@ -1258,6 +1248,17 @@
           {
             "node": "Lia agent",
             "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Lia agent",
+            "type": "ai_languageModel",
             "index": 0
           }
         ]

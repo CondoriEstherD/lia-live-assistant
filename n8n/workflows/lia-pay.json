@@ -2,15 +2,15 @@
   "name": "lia-pay",
   "nodes": [
     {
-      "id": "e8360fe9-519e-4887-a385-fd6acd090b8d",
-      "name": "GET pay page",
+      "id": "114e92c1-5807-4e56-95a9-f1a2ebd68bd1",
+      "name": "Webhook pay page",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
       "position": [
         0,
         0
       ],
-      "webhookId": "b6a52098-f207-49a0-9e9b-8484af9449ba",
+      "webhookId": "e32c7d3e-a164-4fe9-a51a-2cda98a53f74",
       "parameters": {
         "httpMethod": "GET",
         "path": "lia-pay",
@@ -19,15 +19,78 @@
       }
     },
     {
-      "id": "b7eff3b7-0b78-4882-aa11-4ecd628c3eac",
-      "name": "POST confirm",
+      "id": "b2bd72b6-52e2-46d1-a55d-b57817d376d9",
+      "name": "RPC get QR",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        220,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "__SUPABASE_URL__/rest/v1/rpc/lia_get_payment_qr",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ p_token: $json.query.token ?? \"\" }) }}",
+        "options": {}
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "__CRED:Supabase Lia__",
+          "name": "Supabase Lia"
+        }
+      }
+    },
+    {
+      "id": "6e90c73f-b4a6-499c-801b-213d70f4a47f",
+      "name": "Build pay page",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// Logic copied from n8n/code/lia-messages.js and n8n/code/lia-pay-page.js (keep in sync).\n// Builds the WhatsApp Cloud API message bodies Lia sends.\n// Every function returns the JSON body for POST /{phone-number-id}/messages, or null\n// when Lia must stay silent. Used inside n8n Code nodes and tested with `npm test`.\n\nconst DEFAULT_CONFIG = {\n  timeZone: 'America/La_Paz',\n  currency: 'Bs',\n  payBaseUrl: 'https://marilyncd12.app.n8n.cloud/webhook/lia-pay',\n  qrImageBaseUrl: 'https://quickchart.io/qr',\n};\n\nfunction formatAmount(amount, config = DEFAULT_CONFIG) {\n  const value = Number(amount).toFixed(2).replace('.', ',');\n  return `${config.currency} ${value}`;\n}\n\nfunction formatTime(iso, config = DEFAULT_CONFIG) {\n  return new Intl.DateTimeFormat('es-BO', {\n    timeZone: config.timeZone,\n    hour: '2-digit',\n    minute: '2-digit',\n    hour12: false,\n  }).format(new Date(iso));\n}\n\nfunction garmentLabel(garment) {\n  const parts = [garment.code];\n  if (garment.name && garment.name !== garment.code) parts.push(garment.name);\n  if (garment.size) parts.push(`talla ${garment.size}`);\n  if (garment.color) parts.push(garment.color);\n  return parts.join(' · ');\n}\n\nfunction text(to, body) {\n  return { messaging_product: 'whatsapp', to, type: 'text', text: { body } };\n}\n\nfunction image(to, link, caption) {\n  return { messaging_product: 'whatsapp', to, type: 'image', image: { link, caption } };\n}\n\nfunction payUrl(token, config = DEFAULT_CONFIG) {\n  return `${config.payBaseUrl}?token=${encodeURIComponent(token)}`;\n}\n\nfunction qrImageUrl(token, config = DEFAULT_CONFIG) {\n  const params = new URLSearchParams({ text: payUrl(token, config), size: '600', margin: '2' });\n  return `${config.qrImageBaseUrl}?${params.toString()}`;\n}\n\n/** Photo of the garment + \"is this the one?\" buttons (result of lia_request_garment). */\nfunction buildPreviewMessage(to, garment, config = DEFAULT_CONFIG) {\n  const body =\n    `Lia: ¿Es esta prenda?\\n\\n${garmentLabel(garment)}\\nPrecio: ${formatAmount(garment.price, config)}` +\n    (garment.description ? `\\n${garment.description}` : '');\n\n  const interactive = {\n    type: 'button',\n    body: { text: body },\n    action: {\n      buttons: [\n        { type: 'reply', reply: { id: 'lia_confirm', title: 'Sí, es esta' } },\n        { type: 'reply', reply: { id: 'lia_reject', title: 'No es esta' } },\n      ],\n    },\n  };\n  if (garment.photo_url) {\n    interactive.header = { type: 'image', image: { link: garment.photo_url } };\n  }\n  return { messaging_product: 'whatsapp', to, type: 'interactive', interactive };\n}\n\n/** Reply to lia_request_garment. */\nfunction buildRequestReply(to, result, config = DEFAULT_CONFIG) {\n  switch (result.status) {\n    case 'pending_confirmation':\n      return buildPreviewMessage(to, result.garment, config);\n    case 'not_found':\n      return text(to, `Lia: no encontré la prenda ${result.code}. Revisa el código que dijeron en el live y escríbelo de nuevo.`);\n    case 'sold_out':\n      return text(to, `Lia: la ${result.garment.code} ya se vendió. Escribe el código de otra prenda del live.`);\n    case 'no_live':\n      return text(to, 'Lia: ahora no hay un live activo. Te esperamos en el próximo live.');\n    case 'already_requested':\n      return text(to, `Lia: ya tienes un pedido de la ${result.garment.code} en curso. Te aviso apenas avance.`);\n    default: // duplicate, unknown_seller\n      return null;\n  }\n}\n\n/**\n * Reply to lia_confirm_request. 'active' and 'queued' return null: the QR and the\n * queue position arrive through the notification outbox.\n */\nfunction buildConfirmReply(to, result) {\n  switch (result.status) {\n    case 'confirmation_expired':\n      return text(to, `Lia: pasó el tiempo para confirmar la ${result.garment.code}. Si todavía la quieres, escribe el código otra vez.`);\n    case 'sold_out':\n      return text(to, `Lia: lo siento, la ${result.garment.code} ya se vendió.`);\n    case 'limit_reached':\n      return text(to, `Lia: ya tienes ${result.limit} prendas reservadas. Paga alguna para reservar otra.`);\n    case 'nothing_to_confirm':\n      return text(to, 'Lia: no tengo ninguna prenda pendiente para confirmar. Escribe el código de la prenda que quieres.');\n    default: // active, queued, duplicate, unknown_seller\n      return null;\n  }\n}\n\n/** Builds the WhatsApp body for one outbox notification (lia_pending_notifications row). */\nfunction buildNotificationMessage(notification, config = DEFAULT_CONFIG) {\n  const to = notification.customer_phone;\n  const p = notification.payload ?? {};\n  const g = p.garment ?? {};\n\n  switch (notification.kind) {\n    case 'reservation_qr':\n      return image(\n        to,\n        qrImageUrl(p.qr_token, config),\n        `Lia: ¡la ${garmentLabel(g)} es tuya si pagas a tiempo!\\n` +\n          `Monto: ${formatAmount(p.amount, config)}\\n` +\n          `Válido hasta: ${formatTime(p.expires_at, config)} (5 minutos)\\n\\n` +\n          'Escanea o guarda este QR y págalo desde la app de tu banco. Después de esa hora el QR ya no se puede pagar.',\n      );\n    case 'queued':\n      return text(to, `Lia: estás en el puesto #${p.position} de la fila para la ${g.code}. Si se libera, te mando el QR al toque.`);\n    case 'payment_reminder':\n      return text(to, `Lia: te queda 1 minuto para pagar la ${g.code} (hasta las ${formatTime(p.expires_at, config)}).`);\n    case 'payment_confirmed':\n      return text(to, `Lia: ¡pago confirmado! La ${garmentLabel(g)} es tuya. La tienda te contactará para la entrega.`);\n    case 'qr_expired':\n      return text(to, `Lia: tu QR de la ${g.code} venció y ya no se puede pagar. La prenda pasó a la siguiente persona de la fila.`);\n    case 'sold_out':\n      return text(to, `Lia: la ${g.code} ya fue vendida. Escribe el código de otra prenda del live.`);\n    case 'confirmation_expired':\n      return text(to, `Lia: no confirmaste la ${g.code} a tiempo. Si todavía la quieres, escribe el código otra vez.`);\n    case 'live_ended':\n      return text(to, `Lia: el live terminó y tu pedido de la ${g.code} se canceló. ¡Te esperamos en el próximo!`);\n    default:\n      return null;\n  }\n}\n\n// HTML of the simulated payment page (Lia Pay) served by the n8n workflow `lia-pay`.\n// Input: the lia_get_payment_qr result and the token. Used in a Code node before\n// \"Respond to Webhook\" (Content-Type: text/html).\n\n\nfunction escapeHtml(value) {\n  return String(value ?? '')\n    .replace(/&/g, '&amp;')\n    .replace(/</g, '&lt;')\n    .replace(/>/g, '&gt;')\n    .replace(/\"/g, '&quot;');\n}\n\nfunction layout(title, body) {\n  return `<!doctype html>\n<html lang=\"es\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\n<title>${escapeHtml(title)}</title>\n<style>\n  body{margin:0;font-family:system-ui,sans-serif;background:#fff5f8;color:#2b1b22;display:flex;justify-content:center}\n  main{max-width:420px;width:100%;padding:24px 16px;text-align:center}\n  .brand{color:#d6336c;font-weight:800;font-size:28px}\n  .card{background:#fff;border-radius:16px;padding:20px;box-shadow:0 4px 16px #0001;margin-top:16px}\n  .amount{font-size:32px;font-weight:700;margin:8px 0}\n  .timer{font-size:20px;color:#d6336c;font-weight:700}\n  button{width:100%;padding:16px;border:0;border-radius:12px;background:#d6336c;color:#fff;font-size:18px;font-weight:700}\n  button:disabled{background:#bbb}\n  .muted{color:#7a6870;font-size:14px}\n</style></head><body><main><div class=\"brand\">Lia Pay</div><div class=\"muted\">Pago simulado · demo</div>${body}</main></body></html>`;\n}\n\nfunction buildPayPage(result, token, config = DEFAULT_CONFIG) {\n  if (result.status === 'not_found') {\n    return layout('QR no válido', '<div class=\"card\"><h2>QR no válido</h2></div>');\n  }\n\n  const g = result.garment ?? {};\n  const info = `<p>${escapeHtml(g.code)} · ${escapeHtml(g.name)}</p>\n    <div class=\"amount\">${escapeHtml(formatAmount(result.amount, config))}</div>`;\n\n  if (result.status === 'paid') {\n    return layout('Pago confirmado', `<div class=\"card\">${info}<h2>✅ Pago confirmado</h2></div>`);\n  }\n  if (result.status !== 'active') {\n    return layout('QR vencido', `<div class=\"card\">${info}<h2>⛔ QR vencido</h2>\n      <p class=\"muted\">Este QR ya no se puede pagar.</p></div>`);\n  }\n\n  return layout('Pagar', `<div class=\"card\">${info}\n    <p>Válido hasta ${escapeHtml(formatTime(result.expires_at, config))}</p>\n    <p class=\"timer\" id=\"t\"></p>\n    <form method=\"post\" action=\"${escapeHtml(config.payBaseUrl)}/confirm\">\n      <input type=\"hidden\" name=\"token\" value=\"${escapeHtml(token)}\">\n      <button id=\"b\" type=\"submit\">Pagar</button>\n    </form></div>\n<script>\n  let s=${Number(result.seconds_left) || 0};const t=document.getElementById('t'),b=document.getElementById('b');\n  function tick(){if(s<=0){t.textContent='QR vencido';b.disabled=true;return}\n    t.textContent=Math.floor(s/60)+':'+String(s%60).padStart(2,'0');s--;setTimeout(tick,1000)}\n  tick();\n</script>`);\n}\n\nconst token = $('Webhook pay page').first().json.query.token ?? '';\nreturn [{ json: { html: buildPayPage($input.first().json, token) } }];\n"
+      }
+    },
+    {
+      "id": "ea28050d-48d9-4b24-979e-8e7875e0fb99",
+      "name": "Respond pay page",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        660,
+        0
+      ],
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ $json.html }}",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "text/html; charset=utf-8"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "f13ce0b6-cbe8-4ff3-aa8c-93814a526ae5",
+      "name": "Webhook confirm",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
       "position": [
         0,
-        200
+        300
       ],
-      "webhookId": "84eb7874-f689-4180-9b7a-4dc49e619e0a",
+      "webhookId": "5527ad33-3683-4b68-a348-7f70cdc178be",
       "parameters": {
         "httpMethod": "POST",
         "path": "lia-pay/confirm",
@@ -36,111 +99,22 @@
       }
     },
     {
-      "id": "acd8cbd5-a860-4dfa-aedb-dc50bdd8c8ea",
-      "name": "Config",
-      "type": "n8n-nodes-base.set",
-      "typeVersion": 3.4,
-      "position": [
-        220,
-        100
-      ],
-      "parameters": {
-        "mode": "manual",
-        "includeOtherFields": false,
-        "options": {},
-        "assignments": {
-          "assignments": [
-            {
-              "id": "3831e663-083a-4e4f-84eb-c7e2dbb11dd8",
-              "name": "supabaseUrl",
-              "value": "__SUPABASE_URL__",
-              "type": "string"
-            },
-            {
-              "id": "868616e1-7791-4016-9aeb-597db6fdaa8c",
-              "name": "waGraphVersion",
-              "value": "__WA_GRAPH_VERSION__",
-              "type": "string"
-            },
-            {
-              "id": "964871e5-5a31-42c5-a8fc-0d410832bc7b",
-              "name": "waVerifyToken",
-              "value": "__WA_VERIFY_TOKEN__",
-              "type": "string"
-            },
-            {
-              "id": "b20e207e-590d-419b-953f-a7966a840816",
-              "name": "payBaseUrl",
-              "value": "__N8N_BASE_URL__/webhook/lia-pay",
-              "type": "string"
-            },
-            {
-              "id": "4936b260-c9a5-42b9-a406-3b4930276223",
-              "name": "token",
-              "value": "={{ $json.query?.token ?? $json.body?.token ?? '' }}",
-              "type": "string"
-            },
-            {
-              "id": "b385396c-2636-4b67-afe0-11b59bd42da9",
-              "name": "isConfirm",
-              "value": "={{ !!($json.body && $json.body.token) }}",
-              "type": "boolean"
-            }
-          ]
-        }
-      }
-    },
-    {
-      "id": "5fe5a6d6-ce03-46a6-b6c9-1fd5ab69fe2b",
-      "name": "Is confirm",
-      "type": "n8n-nodes-base.if",
-      "typeVersion": 2.2,
-      "position": [
-        440,
-        100
-      ],
-      "parameters": {
-        "options": {},
-        "conditions": {
-          "options": {
-            "caseSensitive": true,
-            "leftValue": "",
-            "typeValidation": "loose",
-            "version": 2
-          },
-          "combinator": "and",
-          "conditions": [
-            {
-              "id": "b74fd69b-4ce5-46c1-892e-e565e89d66ad",
-              "leftValue": "={{ $json.isConfirm }}",
-              "rightValue": "",
-              "operator": {
-                "type": "boolean",
-                "operation": "true",
-                "singleValue": true
-              }
-            }
-          ]
-        }
-      }
-    },
-    {
-      "id": "70896c69-4a61-475b-8b6c-053157cfaebf",
-      "name": "RPC read amount",
+      "id": "c97bcb83-f65a-4409-b1ed-da70341632ac",
+      "name": "RPC get QR before pay",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        660,
-        200
+        220,
+        300
       ],
       "parameters": {
         "method": "POST",
-        "url": "={{ $('Config').first().json.supabaseUrl }}/rest/v1/rpc/lia_get_payment_qr",
+        "url": "__SUPABASE_URL__/rest/v1/rpc/lia_get_payment_qr",
         "authentication": "predefinedCredentialType",
         "nodeCredentialType": "supabaseApi",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ p_token: $('Config').first().json.token }) }}",
+        "jsonBody": "={{ JSON.stringify({ p_token: $json.body.token ?? \"\" }) }}",
         "options": {}
       },
       "credentials": {
@@ -151,22 +125,22 @@
       }
     },
     {
-      "id": "a5c53809-6808-4333-b841-4393c0fea2ad",
+      "id": "1d6e7058-d10c-4320-a29d-572b3808473d",
       "name": "RPC confirm payment",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        880,
-        200
+        440,
+        300
       ],
       "parameters": {
         "method": "POST",
-        "url": "={{ $('Config').first().json.supabaseUrl }}/rest/v1/rpc/lia_confirm_payment",
+        "url": "__SUPABASE_URL__/rest/v1/rpc/lia_confirm_payment",
         "authentication": "predefinedCredentialType",
         "nodeCredentialType": "supabaseApi",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ p_token: $('Config').first().json.token, p_amount: $('RPC read amount').first().json.amount ?? null, p_paid_at: $now.toISO(), p_provider: 'lia_pay_mock', p_external_id: null, p_raw_payload: {} }) }}",
+        "jsonBody": "={{ JSON.stringify({ p_token: $('Webhook confirm').first().json.body.token ?? '', p_amount: $json.amount ?? null, p_paid_at: new Date().toISOString(), p_provider: 'lia_pay_mock', p_external_id: $('Webhook confirm').first().json.body.token ?? null, p_raw_payload: {} }) }}",
         "options": {}
       },
       "credentials": {
@@ -177,52 +151,22 @@
       }
     },
     {
-      "id": "10162113-a08d-4bf0-8d4d-b61084be0242",
-      "name": "Run lia-dispatch",
-      "type": "n8n-nodes-base.executeWorkflow",
-      "typeVersion": 1.2,
-      "position": [
-        1100,
-        200
-      ],
-      "parameters": {
-        "source": "database",
-        "workflowId": {
-          "__rl": true,
-          "mode": "id",
-          "value": "__WF:lia-dispatch__"
-        },
-        "mode": "once",
-        "workflowInputs": {
-          "mappingMode": "defineBelow",
-          "value": {},
-          "matchingColumns": [],
-          "schema": [],
-          "attemptToConvertTypes": false,
-          "convertFieldsToString": true
-        },
-        "options": {
-          "waitForSubWorkflow": false
-        }
-      }
-    },
-    {
-      "id": "a4ff3151-b25c-40ab-9a26-b064fe0fd334",
-      "name": "RPC get payment QR",
+      "id": "e36bca08-87f4-4a38-8449-f65405ffc93f",
+      "name": "RPC get QR after pay",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        1320,
-        0
+        660,
+        300
       ],
       "parameters": {
         "method": "POST",
-        "url": "={{ $('Config').first().json.supabaseUrl }}/rest/v1/rpc/lia_get_payment_qr",
+        "url": "__SUPABASE_URL__/rest/v1/rpc/lia_get_payment_qr",
         "authentication": "predefinedCredentialType",
         "nodeCredentialType": "supabaseApi",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ p_token: $('Config').first().json.token }) }}",
+        "jsonBody": "={{ JSON.stringify({ p_token: $('Webhook confirm').first().json.body.token ?? '' }) }}",
         "options": {}
       },
       "credentials": {
@@ -233,34 +177,31 @@
       }
     },
     {
-      "id": "2dcc3289-44d6-4a2c-bb58-ad8b8efab080",
-      "name": "Build pay page",
+      "id": "84b80e4b-a1d3-4286-bd69-a6ae30706446",
+      "name": "Build result page",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1540,
-        0
+        880,
+        300
       ],
       "parameters": {
-        "mode": "runOnceForAllItems",
-        "language": "javaScript",
-        "jsCode": "//@include lia-messages.js\n//@include lia-pay-page.js\n\nconst cfg = $('Config').first().json;\nconst config = { ...DEFAULT_CONFIG, payBaseUrl: cfg.payBaseUrl };\nconst result = $input.first().json ?? {};\nreturn [{ json: { html: buildPayPage(result, cfg.token, config) } }];"
+        "jsCode": "// Logic copied from n8n/code/lia-messages.js and n8n/code/lia-pay-page.js (keep in sync).\n// Builds the WhatsApp Cloud API message bodies Lia sends.\n// Every function returns the JSON body for POST /{phone-number-id}/messages, or null\n// when Lia must stay silent. Used inside n8n Code nodes and tested with `npm test`.\n\nconst DEFAULT_CONFIG = {\n  timeZone: 'America/La_Paz',\n  currency: 'Bs',\n  payBaseUrl: 'https://marilyncd12.app.n8n.cloud/webhook/lia-pay',\n  qrImageBaseUrl: 'https://quickchart.io/qr',\n};\n\nfunction formatAmount(amount, config = DEFAULT_CONFIG) {\n  const value = Number(amount).toFixed(2).replace('.', ',');\n  return `${config.currency} ${value}`;\n}\n\nfunction formatTime(iso, config = DEFAULT_CONFIG) {\n  return new Intl.DateTimeFormat('es-BO', {\n    timeZone: config.timeZone,\n    hour: '2-digit',\n    minute: '2-digit',\n    hour12: false,\n  }).format(new Date(iso));\n}\n\nfunction garmentLabel(garment) {\n  const parts = [garment.code];\n  if (garment.name && garment.name !== garment.code) parts.push(garment.name);\n  if (garment.size) parts.push(`talla ${garment.size}`);\n  if (garment.color) parts.push(garment.color);\n  return parts.join(' · ');\n}\n\nfunction text(to, body) {\n  return { messaging_product: 'whatsapp', to, type: 'text', text: { body } };\n}\n\nfunction image(to, link, caption) {\n  return { messaging_product: 'whatsapp', to, type: 'image', image: { link, caption } };\n}\n\nfunction payUrl(token, config = DEFAULT_CONFIG) {\n  return `${config.payBaseUrl}?token=${encodeURIComponent(token)}`;\n}\n\nfunction qrImageUrl(token, config = DEFAULT_CONFIG) {\n  const params = new URLSearchParams({ text: payUrl(token, config), size: '600', margin: '2' });\n  return `${config.qrImageBaseUrl}?${params.toString()}`;\n}\n\n/** Photo of the garment + \"is this the one?\" buttons (result of lia_request_garment). */\nfunction buildPreviewMessage(to, garment, config = DEFAULT_CONFIG) {\n  const body =\n    `Lia: ¿Es esta prenda?\\n\\n${garmentLabel(garment)}\\nPrecio: ${formatAmount(garment.price, config)}` +\n    (garment.description ? `\\n${garment.description}` : '');\n\n  const interactive = {\n    type: 'button',\n    body: { text: body },\n    action: {\n      buttons: [\n        { type: 'reply', reply: { id: 'lia_confirm', title: 'Sí, es esta' } },\n        { type: 'reply', reply: { id: 'lia_reject', title: 'No es esta' } },\n      ],\n    },\n  };\n  if (garment.photo_url) {\n    interactive.header = { type: 'image', image: { link: garment.photo_url } };\n  }\n  return { messaging_product: 'whatsapp', to, type: 'interactive', interactive };\n}\n\n/** Reply to lia_request_garment. */\nfunction buildRequestReply(to, result, config = DEFAULT_CONFIG) {\n  switch (result.status) {\n    case 'pending_confirmation':\n      return buildPreviewMessage(to, result.garment, config);\n    case 'not_found':\n      return text(to, `Lia: no encontré la prenda ${result.code}. Revisa el código que dijeron en el live y escríbelo de nuevo.`);\n    case 'sold_out':\n      return text(to, `Lia: la ${result.garment.code} ya se vendió. Escribe el código de otra prenda del live.`);\n    case 'no_live':\n      return text(to, 'Lia: ahora no hay un live activo. Te esperamos en el próximo live.');\n    case 'already_requested':\n      return text(to, `Lia: ya tienes un pedido de la ${result.garment.code} en curso. Te aviso apenas avance.`);\n    default: // duplicate, unknown_seller\n      return null;\n  }\n}\n\n/**\n * Reply to lia_confirm_request. 'active' and 'queued' return null: the QR and the\n * queue position arrive through the notification outbox.\n */\nfunction buildConfirmReply(to, result) {\n  switch (result.status) {\n    case 'confirmation_expired':\n      return text(to, `Lia: pasó el tiempo para confirmar la ${result.garment.code}. Si todavía la quieres, escribe el código otra vez.`);\n    case 'sold_out':\n      return text(to, `Lia: lo siento, la ${result.garment.code} ya se vendió.`);\n    case 'limit_reached':\n      return text(to, `Lia: ya tienes ${result.limit} prendas reservadas. Paga alguna para reservar otra.`);\n    case 'nothing_to_confirm':\n      return text(to, 'Lia: no tengo ninguna prenda pendiente para confirmar. Escribe el código de la prenda que quieres.');\n    default: // active, queued, duplicate, unknown_seller\n      return null;\n  }\n}\n\n/** Builds the WhatsApp body for one outbox notification (lia_pending_notifications row). */\nfunction buildNotificationMessage(notification, config = DEFAULT_CONFIG) {\n  const to = notification.customer_phone;\n  const p = notification.payload ?? {};\n  const g = p.garment ?? {};\n\n  switch (notification.kind) {\n    case 'reservation_qr':\n      return image(\n        to,\n        qrImageUrl(p.qr_token, config),\n        `Lia: ¡la ${garmentLabel(g)} es tuya si pagas a tiempo!\\n` +\n          `Monto: ${formatAmount(p.amount, config)}\\n` +\n          `Válido hasta: ${formatTime(p.expires_at, config)} (5 minutos)\\n\\n` +\n          'Escanea o guarda este QR y págalo desde la app de tu banco. Después de esa hora el QR ya no se puede pagar.',\n      );\n    case 'queued':\n      return text(to, `Lia: estás en el puesto #${p.position} de la fila para la ${g.code}. Si se libera, te mando el QR al toque.`);\n    case 'payment_reminder':\n      return text(to, `Lia: te queda 1 minuto para pagar la ${g.code} (hasta las ${formatTime(p.expires_at, config)}).`);\n    case 'payment_confirmed':\n      return text(to, `Lia: ¡pago confirmado! La ${garmentLabel(g)} es tuya. La tienda te contactará para la entrega.`);\n    case 'qr_expired':\n      return text(to, `Lia: tu QR de la ${g.code} venció y ya no se puede pagar. La prenda pasó a la siguiente persona de la fila.`);\n    case 'sold_out':\n      return text(to, `Lia: la ${g.code} ya fue vendida. Escribe el código de otra prenda del live.`);\n    case 'confirmation_expired':\n      return text(to, `Lia: no confirmaste la ${g.code} a tiempo. Si todavía la quieres, escribe el código otra vez.`);\n    case 'live_ended':\n      return text(to, `Lia: el live terminó y tu pedido de la ${g.code} se canceló. ¡Te esperamos en el próximo!`);\n    default:\n      return null;\n  }\n}\n\n// HTML of the simulated payment page (Lia Pay) served by the n8n workflow `lia-pay`.\n// Input: the lia_get_payment_qr result and the token. Used in a Code node before\n// \"Respond to Webhook\" (Content-Type: text/html).\n\n\nfunction escapeHtml(value) {\n  return String(value ?? '')\n    .replace(/&/g, '&amp;')\n    .replace(/</g, '&lt;')\n    .replace(/>/g, '&gt;')\n    .replace(/\"/g, '&quot;');\n}\n\nfunction layout(title, body) {\n  return `<!doctype html>\n<html lang=\"es\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\n<title>${escapeHtml(title)}</title>\n<style>\n  body{margin:0;font-family:system-ui,sans-serif;background:#fff5f8;color:#2b1b22;display:flex;justify-content:center}\n  main{max-width:420px;width:100%;padding:24px 16px;text-align:center}\n  .brand{color:#d6336c;font-weight:800;font-size:28px}\n  .card{background:#fff;border-radius:16px;padding:20px;box-shadow:0 4px 16px #0001;margin-top:16px}\n  .amount{font-size:32px;font-weight:700;margin:8px 0}\n  .timer{font-size:20px;color:#d6336c;font-weight:700}\n  button{width:100%;padding:16px;border:0;border-radius:12px;background:#d6336c;color:#fff;font-size:18px;font-weight:700}\n  button:disabled{background:#bbb}\n  .muted{color:#7a6870;font-size:14px}\n</style></head><body><main><div class=\"brand\">Lia Pay</div><div class=\"muted\">Pago simulado · demo</div>${body}</main></body></html>`;\n}\n\nfunction buildPayPage(result, token, config = DEFAULT_CONFIG) {\n  if (result.status === 'not_found') {\n    return layout('QR no válido', '<div class=\"card\"><h2>QR no válido</h2></div>');\n  }\n\n  const g = result.garment ?? {};\n  const info = `<p>${escapeHtml(g.code)} · ${escapeHtml(g.name)}</p>\n    <div class=\"amount\">${escapeHtml(formatAmount(result.amount, config))}</div>`;\n\n  if (result.status === 'paid') {\n    return layout('Pago confirmado', `<div class=\"card\">${info}<h2>✅ Pago confirmado</h2></div>`);\n  }\n  if (result.status !== 'active') {\n    return layout('QR vencido', `<div class=\"card\">${info}<h2>⛔ QR vencido</h2>\n      <p class=\"muted\">Este QR ya no se puede pagar.</p></div>`);\n  }\n\n  return layout('Pagar', `<div class=\"card\">${info}\n    <p>Válido hasta ${escapeHtml(formatTime(result.expires_at, config))}</p>\n    <p class=\"timer\" id=\"t\"></p>\n    <form method=\"post\" action=\"${escapeHtml(config.payBaseUrl)}/confirm\">\n      <input type=\"hidden\" name=\"token\" value=\"${escapeHtml(token)}\">\n      <button id=\"b\" type=\"submit\">Pagar</button>\n    </form></div>\n<script>\n  let s=${Number(result.seconds_left) || 0};const t=document.getElementById('t'),b=document.getElementById('b');\n  function tick(){if(s<=0){t.textContent='QR vencido';b.disabled=true;return}\n    t.textContent=Math.floor(s/60)+':'+String(s%60).padStart(2,'0');s--;setTimeout(tick,1000)}\n  tick();\n</script>`);\n}\n\nconst token = $('Webhook confirm').first().json.body.token ?? '';\nreturn [{ json: { html: buildPayPage($input.first().json, token) } }];\n"
       }
     },
     {
-      "id": "fe7314ea-5d4f-4962-8af4-779d03d01d58",
-      "name": "Respond HTML",
+      "id": "9c1b1876-e1fa-4b19-aa42-9632aa6fbbb9",
+      "name": "Respond result page",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
       "position": [
-        1760,
-        0
+        1100,
+        300
       ],
       "parameters": {
         "respondWith": "text",
         "responseBody": "={{ $json.html }}",
         "options": {
-          "responseCode": 200,
           "responseHeaders": {
             "entries": [
               {
@@ -274,91 +215,18 @@
     }
   ],
   "connections": {
-    "GET pay page": {
+    "Webhook pay page": {
       "main": [
         [
           {
-            "node": "Config",
+            "node": "RPC get QR",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "POST confirm": {
-      "main": [
-        [
-          {
-            "node": "Config",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Config": {
-      "main": [
-        [
-          {
-            "node": "Is confirm",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Is confirm": {
-      "main": [
-        [
-          {
-            "node": "RPC read amount",
-            "type": "main",
-            "index": 0
-          }
-        ],
-        [
-          {
-            "node": "RPC get payment QR",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "RPC read amount": {
-      "main": [
-        [
-          {
-            "node": "RPC confirm payment",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "RPC confirm payment": {
-      "main": [
-        [
-          {
-            "node": "Run lia-dispatch",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Run lia-dispatch": {
-      "main": [
-        [
-          {
-            "node": "RPC get payment QR",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "RPC get payment QR": {
+    "RPC get QR": {
       "main": [
         [
           {
@@ -373,7 +241,62 @@
       "main": [
         [
           {
-            "node": "Respond HTML",
+            "node": "Respond pay page",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook confirm": {
+      "main": [
+        [
+          {
+            "node": "RPC get QR before pay",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RPC get QR before pay": {
+      "main": [
+        [
+          {
+            "node": "RPC confirm payment",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RPC confirm payment": {
+      "main": [
+        [
+          {
+            "node": "RPC get QR after pay",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RPC get QR after pay": {
+      "main": [
+        [
+          {
+            "node": "Build result page",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build result page": {
+      "main": [
+        [
+          {
+            "node": "Respond result page",
             "type": "main",
             "index": 0
           }

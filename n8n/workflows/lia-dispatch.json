@@ -19,7 +19,8 @@
             }
           ]
         }
-      }
+      },
+      "disabled": true
     },
     {
       "id": "7cc6dbaf-8496-457f-aecf-516b16e9ade3",

@@ -109,6 +109,7 @@ POST /webhook/lia-pay/confirm (token)  → RPC lia_confirm_payment (p_provider '
                                         → Respond HTML "Pago confirmado" o "QR vencido"
 ```
 
+- Archivo listo para importar: `workflows/lia-pay.json` (reemplazar `__SUPABASE_URL__` y elegir la credencial Supabase).
 - El QR que recibe la compradora apunta a esta página. En la demo se escanea con la cámara del celular.
 - Si pasaron los 5 minutos, la página muestra **"QR vencido"** y Supabase también rechaza el pago
   (doble seguro: aunque alguien llame a la URL a mano, no se puede pagar).
@@ -174,3 +175,19 @@ node n8n/scripts/deploy.mjs --dry-run  # solo genera n8n/dist/*.json para import
 - Opcionales: `SUPABASE_URL`, `WA_VERIFY_TOKEN` (texto que elijas; el mismo que pongas en Meta), `WA_GRAPH_VERSION`.
 - Credenciales en n8n con estos nombres exactos: `Supabase Lia`, `WhatsApp Lia`, `Anthropic Lia`.
 - Los workflows se suben **inactivos**; se activan desde el editor cuando Supabase y WhatsApp estén listos.
+
+## Límite de ejecuciones (plan Starter: 2.500 por mes)
+
+Los Schedule de `lia-dispatch` (cada 10 s) y `lia-expiry` (cada 30 s) están **desactivados**: activos gastarían
+miles de ejecuciones por día. Hoy `lia-dispatch` se dispara cuando alguien confirma o paga. Para el vencimiento
+de los 5 minutos hay dos caminos: activar el Schedule de `lia-expiry` **solo durante el live**, o (mejor) que
+Supabase corra `lia_expire_reservations` con `pg_cron` y avise a n8n con un Database Webhook solo cuando haya cambios.
+
+## Pruebas en la instancia (sin Supabase ni WhatsApp reales)
+
+`n8n/test/fixtures/lia-mock-supabase.json` es un Supabase simulado dentro de n8n. Con
+`SUPABASE_URL=https://marilyncd12.app.n8n.cloud/webhook/<webhookId>/mock-supabase` el deploy apunta los workflows
+al simulador. Probado el 2026-11-21: verificación del webhook de WhatsApp (200 / 403), página de pago (activa, vencida,
+confirmar), código → foto con botones, "SI" → reserva + dispatch, "no" → cancelación, texto libre → agente con
+`gpt-6-luna`. El único paso que falla es el envío a WhatsApp, porque la credencial `WhatsApp Lia` todavía tiene un token de prueba.
+Antes de usar Supabase real: volver a correr el deploy con el `SUPABASE_URL` real.

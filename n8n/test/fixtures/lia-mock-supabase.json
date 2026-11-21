@@ -1,0 +1,46 @@
+{
+  "name": "lia-mock-supabase",
+  "nodes": [
+    {
+      "id": "6f0c1d2a-1111-4c1a-9a01-000000000001",
+      "name": "RPC call",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 0],
+      "webhookId": "6f0c1d2a-1111-4c1a-9a01-0000000000aa",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "mock-supabase/rest/v1/rpc/:fn",
+        "responseMode": "responseNode",
+        "options": {}
+      }
+    },
+    {
+      "id": "6f0c1d2a-1111-4c1a-9a01-000000000002",
+      "name": "Fake response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [220, 0],
+      "parameters": {
+        "jsCode": "const fn = $json.params.fn;\nconst body = $json.body || {};\nconst garment = { id: 'g1', code: 'A12', name: 'Vestido rojo', size: 'M', color: 'rojo', price: 150, photo_url: 'https://picsum.photos/seed/a12/600/800', status: 'in_catalog' };\nconst inFive = new Date(Date.now() + 5 * 60 * 1000).toISOString();\nconst expiredToken = String(body.p_token || '').startsWith('expired');\nconst responses = {\n  lia_request_garment: { status: 'pending_confirmation', reservation_id: 'r1', confirm_deadline: inFive, garment },\n  lia_confirm_request: { status: 'active', reservation_id: 'r1', expires_at: inFive, garment },\n  lia_cancel_request: { status: 'cancelled' },\n  lia_search_catalog: { items: [garment] },\n  lia_customer_status: { items: [{ code: 'A12', name: 'Vestido rojo', status: 'active', expires_at: inFive, position: null }] },\n  lia_expire_reservations: { expired: 0, cancelled: 0, reminders: 0, promoted: 0 },\n  lia_claim_notifications: [],\n  lia_mark_notification_sent: null,\n  lia_get_payment_qr: expiredToken\n    ? { status: 'expired', amount: 150, expires_at: new Date(Date.now() - 60000).toISOString(), seconds_left: 0, garment }\n    : { status: 'active', amount: 150, expires_at: inFive, seconds_left: 300, garment },\n  lia_confirm_payment: expiredToken ? { status: 'expired' } : { status: 'paid', payment_id: 'p1', garment },\n};\nreturn [{ json: { response: responses[fn] ?? { error: 'unknown function ' + fn } } }];"
+      }
+    },
+    {
+      "id": "6f0c1d2a-1111-4c1a-9a01-000000000003",
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [440, 0],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json.response) }}",
+        "options": {}
+      }
+    }
+  ],
+  "connections": {
+    "RPC call": { "main": [[{ "node": "Fake response", "type": "main", "index": 0 }]] },
+    "Fake response": { "main": [[{ "node": "Respond", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" }
+}

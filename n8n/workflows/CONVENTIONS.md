@@ -39,7 +39,7 @@ Later nodes read it with `$('Config').first().json.<field>`.
 |---|---|---|
 | `Supabase Lia` | `supabaseApi` (host + service role key) | every RPC call |
 | `WhatsApp Lia` | `whatsAppApi` (access token + business account id) | every WhatsApp send |
-| `Anthropic Lia` | `anthropicApi` | AI Agent chat model |
+| `OpenAI Lia` | `openAiApi` | AI Agent chat model (`gpt-6-luna`, Responses API, temperature 1) |
 
 In JSON: `"credentials": { "supabaseApi": { "id": "__CRED:Supabase Lia__", "name": "Supabase Lia" } }`.
 The deploy script resolves the id by name, or removes the block so the user selects it in the UI.

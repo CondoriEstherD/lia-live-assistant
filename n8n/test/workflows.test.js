@@ -84,6 +84,11 @@ for (const file of files) {
       if (!isTrigger && !isSubNode) assert.ok(targets.has(node.name), `node "${node.name}" is reachable`);
     }
 
+    for (const node of wf.nodes) {
+      const credType = node.parameters?.nodeCredentialType;
+      if (credType) assert.ok(node.credentials?.[credType], `node "${node.name}" references its ${credType} credential`);
+    }
+
     const text = JSON.stringify(wf);
     assert.doesNotMatch(text, /eyJ[\w-]{20,}/, 'no JWT-looking secrets');
     assert.doesNotMatch(text, /sk-ant-/, 'no Anthropic keys');
